@@ -1,5 +1,15 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# Admin App Instructions
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
+## Scope
+You are working on the Next.js admin app.
+
+## Backend dependency
+- This app depends on ../TraviaBackend
+- Always check whether an admin feature needs backend support
+- Add or extend backend APIs when necessary
+- Use real backend data, not mock data
+
+## Do not
+- Do not hardcode dashboard numbers
+- Do not create fake tables disconnected from backend
+- Do not modify TraviaApp unless explicitly requested or clearly necessary
