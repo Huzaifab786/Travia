@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String               @id @default(cuid())
+  supabaseId     String?              @unique
+  name           String
+  email          String               @unique
+  passwordHash   String?
+  phone          String?              @unique
+  role           Role                 @default(passenger)
+  driverStatus   DriverDocumentStatus @default(unverified)
+  avatarUrl      String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  bookings       Booking[]
+  reviewsGot     Review[]             @relation("ReviewsReceived")
+  reviewsGiven   Review[]             @relation("ReviewsGiven")
+  rides          Ride[]               @relation("DriverRides")
+  vehicle        Vehicle?
+  driverDocuments DriverDocument[]
+}
+
+model Vehicle {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  carModel          String
+  carType           String?
+  engineCC          Int?
+  avgKmPerLitre     Float    @default(12.0)
+  fuelPricePerLitre Float    @default(270.0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id])
+}
+
+model Ride {
+  id              String     @id @default(cuid())
+  driverId        String
+  pickupAddress   String
+  pickupLat       Float
+  pickupLng       Float
+  dropoffAddress  String
+  dropoffLat      Float
+  dropoffLng      Float
+  departureTime   DateTime
+  price           Float
+  seatsTotal      Int
+  status          RideStatus @default(active)
+  notes           String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  distanceMeters  Float?
+  durationSeconds Float?
+  encodedPolyline String?
+  currentLat      Float?
+  currentLng      Float?
+  lastUpdate      DateTime?
+  bookings        Booking[]
+  reviews         Review[]
+  driver          User       @relation("DriverRides", fields: [driverId], references: [id])
+
+  @@index([driverId])
+  @@index([departureTime])
+}
+
+model Booking {
+  id             String        @id @default(cuid())
+  rideId         String
+  passengerId    String
+  seatsRequested Int
+  status         BookingStatus @default(pending)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  passenger      User          @relation(fields: [passengerId], references: [id])
+  ride           Ride          @relation(fields: [rideId], references: [id])
+
+  @@unique([rideId, passengerId])
+  @@index([rideId])
+  @@index([passengerId])
+  @@index([status])
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  rideId     String
+  reviewerId String
+  revieweeId String
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now())
+  reviewee   User     @relation("ReviewsReceived", fields: [revieweeId], references: [id])
+  reviewer   User     @relation("ReviewsGiven", fields: [reviewerId], references: [id])
+  ride       Ride     @relation(fields: [rideId], references: [id])
+
+  @@index([rideId])
+  @@index([revieweeId])
+}
+
+model DriverDocument {
+  id         String   @id @default(cuid())
+  userId     String
+  type       String   // 'cnic' | 'license' | 'registration'
+  url        String
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+enum DriverDocumentStatus {
+  unverified
+  pending
+  verified
+  rejected
+}
+
+enum Role {
+  passenger
+  driver
+  admin
+}
+
+enum RideStatus {
+  active
+  cancelled
+  completed
+}
+
+enum BookingStatus {
+  pending
+  accepted
+  rejected
+  cancelled
+}
