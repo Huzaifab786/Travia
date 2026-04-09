@@ -1,0 +1,5 @@
+ALTER TABLE "Ride"
+  ADD COLUMN IF NOT EXISTS "meetupPoints" JSONB;
+
+ALTER TABLE "Booking"
+  ADD COLUMN IF NOT EXISTS "meetupPoint" JSONB;

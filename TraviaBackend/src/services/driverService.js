@@ -1,24 +1,10 @@
-const prisma = require("../config/db");
+const {
+  getDriverVerificationStatus,
+  submitDriverVerification,
+} = require("./driverVerificationService");
 
 const getDriverStatus = async (userId) => {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      driverStatus: true,
-      driverRejectionReason: true,
-    },
-  });
-
-  if (!user) {
-    const err = new Error("User not found");
-    err.statusCode = 404;
-    throw err;
-  }
-
-  return {
-    status: user.driverStatus,
-    rejectionReason: user.driverRejectionReason,
-  };
+  return getDriverVerificationStatus(userId);
 };
 
 const uploadDocuments = async (userId, documents) => {
@@ -28,28 +14,7 @@ const uploadDocuments = async (userId, documents) => {
     throw err;
   }
 
-  await prisma.$transaction([
-    prisma.driverDocument.deleteMany({
-      where: { userId },
-    }),
-    prisma.driverDocument.createMany({
-      data: documents.map((doc) => ({
-        userId,
-        type: doc.type,
-        url: doc.url,
-        path: doc.path || null,
-      })),
-    }),
-    prisma.user.update({
-      where: { id: userId },
-      data: {
-        driverStatus: "pending",
-        driverRejectionReason: null,
-      },
-    }),
-  ]);
-
-  return { message: "Documents uploaded successfully. Status set to pending." };
+  return submitDriverVerification(userId, documents);
 };
 
 module.exports = {

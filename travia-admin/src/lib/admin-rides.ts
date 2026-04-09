@@ -28,7 +28,7 @@ export async function fetchAdminRides(status?: AdminRideStatus) {
   if (!response.ok) {
     throw new Error(
       ("message" in payload && payload.message) ||
-        `Failed to fetch rides with status ${response.status}`
+        `Failed to fetch rides with status ${response.status}`,
     );
   }
 

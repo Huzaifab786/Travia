@@ -1,11 +1,12 @@
 import { apiClient } from "../../../lib/api/client";
-import type { AuthResponse, UserRole } from "../types/auth";
+import type { AuthResponse, UserGender, UserRole } from "../types/auth";
 
 export const registerApi = (payload: {
   name: string;
   email: string;
   password: string;
   role: UserRole;
+  gender: UserGender;
 }) => {
   return apiClient<AuthResponse>("/api/auth/register", {
     method: "POST",
@@ -30,6 +31,7 @@ export const syncUserApi = (payload: {
   name?: string;
   phone?: string;
   role: UserRole;
+  gender?: UserGender;
 }) => {
   return apiClient<AuthResponse>("/api/auth/sync", {
     method: "POST",

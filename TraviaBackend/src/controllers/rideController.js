@@ -1,7 +1,17 @@
 const rideService = require("../services/rideService");
 
 const createRide = async (req, res) => {
-  const { pickup, dropoff, departureTime, seatsTotal, notes } = req.body;
+  const {
+    pickup,
+    dropoff,
+    departureTime,
+    seatsTotal,
+    notes,
+    femaleOnly,
+    checkpointCount,
+    selectedRouteIndex,
+    manualMeetupPoints,
+  } = req.body;
 
   if (
     !pickup?.address ||
@@ -30,6 +40,10 @@ const createRide = async (req, res) => {
     departureTime,
     seatsTotal: Number(seatsTotal),
     notes,
+    femaleOnly: Boolean(femaleOnly),
+    checkpointCount,
+    selectedRouteIndex,
+    manualMeetupPoints,
   });
 
   const shapedRide = {
@@ -42,7 +56,50 @@ const createRide = async (req, res) => {
 };
 
 const listRides = async (req, res) => {
-  const rides = await rideService.listActiveRides();
+  const {
+    search = "",
+    pickupLat,
+    pickupLng,
+    routeRadiusKm,
+    dropoffLat,
+    dropoffLng,
+    tripType,
+  } = req.query;
+
+  const parsedPickupLat =
+    pickupLat != null && pickupLat !== "" ? Number(pickupLat) : null;
+  const parsedPickupLng =
+    pickupLng != null && pickupLng !== "" ? Number(pickupLng) : null;
+  const parsedDropoffLat =
+    dropoffLat != null && dropoffLat !== "" ? Number(dropoffLat) : null;
+  const parsedDropoffLng =
+    dropoffLng != null && dropoffLng !== "" ? Number(dropoffLng) : null;
+
+  if (
+    (parsedPickupLat != null && Number.isNaN(parsedPickupLat)) ||
+    (parsedPickupLng != null && Number.isNaN(parsedPickupLng)) ||
+    (parsedDropoffLat != null && Number.isNaN(parsedDropoffLat)) ||
+    (parsedDropoffLng != null && Number.isNaN(parsedDropoffLng))
+  ) {
+    return res.status(400).json({
+      message: "pickup/dropoff coordinates must be valid numbers",
+    });
+  }
+
+  const rides = await rideService.listActiveRides({
+    search,
+    pickupLat: parsedPickupLat,
+    pickupLng: parsedPickupLng,
+    routeRadiusKm:
+      routeRadiusKm != null && routeRadiusKm !== ""
+        ? Number(routeRadiusKm)
+        : null,
+    dropoffLat: parsedDropoffLat,
+    dropoffLng: parsedDropoffLng,
+    tripType: tripType === "intra" || tripType === "inter" ? tripType : null,
+    userGender: req.user?.gender ?? null,
+  });
+
   return res.status(200).json({ rides });
 };
 
@@ -105,9 +162,15 @@ const deleteRideController = async (req, res) => {
   return res.status(200).json(result);
 };
 
+const getRideById = async (req, res) => {
+  const ride = await rideService.getRideById(req.params.id, req.user || {});
+  return res.status(200).json({ ride });
+};
+
 module.exports = {
   createRide,
   listRides,
+  getRideById,
   listMyRides,
   cancelRide,
   updateRideLocation,

@@ -23,6 +23,16 @@ export const createRideApi = (payload: {
   departureTime: string;
   seatsTotal: number;
   notes: string;
+  femaleOnly?: boolean;
+  checkpointCount?: number;
+  selectedRouteIndex?: number;
+  manualMeetupPoints?: Array<{
+    label: string;
+    address?: string;
+    lat: number;
+    lng: number;
+    order?: number;
+  }>;
 }) => {
   return apiClient<{ ride: Ride }>("/api/rides", {
     method: "POST",

@@ -8,14 +8,16 @@ const vehicleRoutes = require("./routes/vehicleRoutes");
 const routeRoutes = require("./routes/routeRoutes");
 const placeRoutes = require("./routes/placeRoutes");
 const driverRoutes = require("./routes/driverRoutes");
+const pricingRoutes = require("./routes/pricingRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const reviewRoutes = require("./routes/reviewRoutes")
 
 
 const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: "10kb" }));
+app.use(express.json({ limit: "1mb" }));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -32,7 +34,10 @@ app.use("/api/drivers", driverRoutes);
 
 app.use("/api/routes", routeRoutes);
 app.use("/api/places", placeRoutes);
+app.use("/api/pricing", pricingRoutes);
 app.use("/api/admin",  adminRoutes);
+
+app.use("/api/reviews", reviewRoutes)
 
 
 /** ✅ Global error handler (MUST be last) */

@@ -1,7 +1,13 @@
 const bookingService = require("../services/bookingService");
 
 const createBooking = async (req, res) => {
-  const { rideId, seatsRequested } = req.body;
+  const {
+    rideId,
+    seatsRequested,
+    meetupPoint,
+    passengerPickup,
+    passengerDropoff,
+  } = req.body;
 
   if (!rideId) {
     return res.status(400).json({ message: "rideId is required" });
@@ -14,9 +20,40 @@ const createBooking = async (req, res) => {
       .json({ message: "seatsRequested must be at least 1" });
   }
 
-  const booking = await bookingService.createBooking(req.user.id, rideId, seats);
+  const booking = await bookingService.createBooking(
+    req.user.id,
+    {
+      rideId,
+      seatsRequested: seats,
+      meetupPoint,
+      passengerPickup,
+      passengerDropoff,
+    },
+  );
 
   return res.status(201).json({ booking });
+};
+
+const quoteBooking = async (req, res) => {
+  const {
+    rideId,
+    seatsRequested,
+    passengerPickup,
+    passengerDropoff,
+  } = req.body;
+
+  if (!rideId) {
+    return res.status(400).json({ message: "rideId is required" });
+  }
+
+  const quote = await bookingService.quoteBooking(req.user.id, {
+    rideId,
+    seatsRequested,
+    passengerPickup,
+    passengerDropoff,
+  });
+
+  return res.status(200).json({ quote });
 };
 
 const listMyBookings = async (req, res) => {
@@ -73,4 +110,5 @@ module.exports = {
   getMyBookingForRide,
   cancelMyBooking,
   deleteBookingController,
+  quoteBooking,
 };

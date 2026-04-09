@@ -8,24 +8,27 @@ datasource db {
 }
 
 model User {
-  id             String               @id @default(cuid())
-  supabaseId     String?              @unique
-  name           String
-  email          String               @unique
-  passwordHash   String?
-  phone          String?              @unique
-  role           Role                 @default(passenger)
-  driverStatus   DriverDocumentStatus @default(unverified)
-  driverRejectionReason     String?
-  avatarUrl      String?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-  bookings       Booking[]
-  reviewsGot     Review[]             @relation("ReviewsReceived")
-  reviewsGiven   Review[]             @relation("ReviewsGiven")
-  rides          Ride[]               @relation("DriverRides")
-  vehicle        Vehicle?
-  driverDocuments DriverDocument[]
+  id                    String               @id @default(cuid())
+  name                  String
+  email                 String               @unique
+  passwordHash          String?
+  phone                 String?              @unique
+  gender                Gender?
+  role                  Role                 @default(passenger)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  supabaseId            String?              @unique
+  avatarUrl             String?
+  driverStatus          DriverDocumentStatus @default(unverified)
+  driverRejectionReason String?
+  bookings              Booking[]
+  driverDocuments       DriverDocument[]
+  driverVerification    DriverVerification?
+  driverVerificationsReviewed DriverVerification[] @relation("DriverVerificationReviewedBy")
+  reviewsGot            Review[]             @relation("ReviewsReceived")
+  reviewsGiven          Review[]             @relation("ReviewsGiven")
+  rides                 Ride[]               @relation("DriverRides")
+  vehicle               Vehicle?
 }
 
 model Vehicle {
@@ -33,17 +36,29 @@ model Vehicle {
   userId            String   @unique
   carModel          String
   carType           String?
+  vehicleNumber     String?  @unique
   engineCC          Int?
   avgKmPerLitre     Float    @default(12.0)
   fuelPricePerLitre Float    @default(270.0)
+  carImageUrl       String?
+  carImagePath      String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   user              User     @relation(fields: [userId], references: [id])
 }
 
+model PricingSetting {
+  id                String   @id @default(cuid())
+  fuelPricePerLitre  Float    @default(270.0)
+  routeRadiusKm     Float    @default(5.0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
 model Ride {
   id              String     @id @default(cuid())
   driverId        String
+  femaleOnly      Boolean    @default(false)
   pickupAddress   String
   pickupLat       Float
   pickupLng       Float
@@ -63,6 +78,7 @@ model Ride {
   currentLat      Float?
   currentLng      Float?
   lastUpdate      DateTime?
+  meetupPoints    Json?
   bookings        Booking[]
   reviews         Review[]
   driver          User       @relation("DriverRides", fields: [driverId], references: [id])
@@ -76,6 +92,10 @@ model Booking {
   rideId         String
   passengerId    String
   seatsRequested Int
+  meetupPoint    Json?
+  passengerPickup Json?
+  passengerDropoff Json?
+  pricingQuote   Json?
   status         BookingStatus @default(pending)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
@@ -96,24 +116,52 @@ model Review {
   rating     Int
   comment    String?
   createdAt  DateTime @default(now())
+
   reviewee   User     @relation("ReviewsReceived", fields: [revieweeId], references: [id])
   reviewer   User     @relation("ReviewsGiven", fields: [reviewerId], references: [id])
   ride       Ride     @relation(fields: [rideId], references: [id])
 
   @@index([rideId])
   @@index([revieweeId])
+  @@unique([rideId, reviewerId, revieweeId])
 }
 
 model DriverDocument {
-  id         String   @id @default(cuid())
-  userId     String
-  type       String   // 'cnic' | 'license' | 'registration'
-  url        String
-  path       String?
-  createdAt  DateTime @default(now())
-  user       User     @relation(fields: [userId], references: [id])
+  id            String              @id @default(cuid())
+  userId        String
+  verificationId String?
+  category      DocumentCategory?
+  side          DocumentSide?
+  type          String
+  url           String
+  createdAt     DateTime            @default(now())
+  path          String?
+  ocrResult     Json?
+  ocrStatus     VerificationDecision @default(pending)
+  ocrReason     String?
+  user          User                @relation(fields: [userId], references: [id])
+  verification  DriverVerification? @relation(fields: [verificationId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([verificationId])
+  @@index([userId, category, side])
+}
+
+model DriverVerification {
+  id                String              @id @default(cuid())
+  userId            String              @unique
+  autoDecision      VerificationDecision @default(pending)
+  autoReason        String?
+  autoResult        Json?
+  adminDecision     AdminReviewDecision  @default(pending)
+  adminReason       String?
+  reviewedByAdminId String?
+  reviewedAt        DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  user              User                @relation(fields: [userId], references: [id])
+  reviewedByAdmin   User?               @relation("DriverVerificationReviewedBy", fields: [reviewedByAdminId], references: [id])
+  documents         DriverDocument[]
 }
 
 enum DriverDocumentStatus {
@@ -121,6 +169,30 @@ enum DriverDocumentStatus {
   pending
   verified
   rejected
+  suspended
+}
+
+enum VerificationDecision {
+  pending
+  approved
+  rejected
+}
+
+enum AdminReviewDecision {
+  pending
+  approved
+  suspended
+}
+
+enum DocumentCategory {
+  cnic
+  license
+  registration
+}
+
+enum DocumentSide {
+  front
+  back
 }
 
 enum Role {
@@ -129,10 +201,18 @@ enum Role {
   admin
 }
 
+enum Gender {
+  male
+  female
+  other
+}
+
 enum RideStatus {
   active
   cancelled
   completed
+  ready
+  in_progress
 }
 
 enum BookingStatus {

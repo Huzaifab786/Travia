@@ -2,7 +2,7 @@ const bcrypt = require("bcryptjs");
 const prisma = require("../config/db");
 const { signToken } = require("../config/jwt");
 
-const register = async ({ name, email, password, role }) => {
+const register = async ({ name, email, password, role, gender }) => {
   const existing = await prisma.user.findUnique({ where: { email } });
 
   if (existing) {
@@ -14,18 +14,25 @@ const register = async ({ name, email, password, role }) => {
   const passwordHash = await bcrypt.hash(password, 12);
 
   const user = await prisma.user.create({
-    data: {
-      name,
-      email,
-      passwordHash,
-      role: role || "passenger",
-    },
-  });
+      data: {
+        name,
+        email,
+        passwordHash,
+        role: role || "passenger",
+        gender: gender || null,
+      },
+    });
 
   const token = signToken({ userId: user.id, role: user.role });
 
   return {
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      gender: user.gender,
+    },
     token,
   };
 };
@@ -56,12 +63,18 @@ const login = async ({ email, password, role }) => {
   const token = signToken({ userId: user.id, role: user.role });
 
   return {
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      gender: user.gender,
+    },
     token,
   };
 };
 
-const syncUser = async ({ supabaseId, email, name, phone, role }) => {
+const syncUser = async ({ supabaseId, email, name, phone, role, gender }) => {
   // 1. Check if user exists by supabaseId
   let user = await prisma.user.findUnique({ where: { supabaseId } });
 
@@ -76,7 +89,7 @@ const syncUser = async ({ supabaseId, email, name, phone, role }) => {
     // Update existing user if needed
     user = await prisma.user.update({
       where: { id: user.id },
-      data: { name, email, phone },
+      data: { name, email, phone, gender: gender || undefined },
     });
   } else {
     // 2. Check if email/phone exists but doesn't have a supabaseId yet (linking step)
@@ -94,7 +107,7 @@ const syncUser = async ({ supabaseId, email, name, phone, role }) => {
 
       user = await prisma.user.update({
         where: { id: existing.id },
-        data: { supabaseId, name, email, phone },
+        data: { supabaseId, name, email, phone, gender: gender || undefined },
       });
     } else {
       // 3. Create new user
@@ -105,6 +118,7 @@ const syncUser = async ({ supabaseId, email, name, phone, role }) => {
           email,
           phone,
           role: role || "passenger",
+          gender: gender || null,
         },
       });
     }
@@ -120,6 +134,7 @@ const syncUser = async ({ supabaseId, email, name, phone, role }) => {
       email: user.email,
       phone: user.phone,
       role: user.role,
+      gender: user.gender,
     },
     token,
   };

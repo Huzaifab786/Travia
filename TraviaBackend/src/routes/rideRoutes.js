@@ -1,11 +1,12 @@
 const express = require("express");
 const router = express.Router();
 
-const { protect } = require("../middlewares/authMiddleware");
+const { protect, optionalProtect } = require("../middlewares/authMiddleware");
 const { requireRole } = require("../middlewares/requireRole");
 const {
   createRide,
   listRides,
+  getRideById,
   listMyRides,
   cancelRide,
   updateRideLocation,
@@ -15,11 +16,15 @@ const {
 } = require("../controllers/rideController");
 
 // Public route (passenger will use this)
-router.get("/", listRides);
+router.get("/", optionalProtect, listRides);
 
 // Driver-only routes
 router.post("/", protect, requireRole("driver"), createRide);
 router.get("/me", protect, requireRole("driver"), listMyRides);
+
+// Passenger / authenticated detail route
+router.get("/:id", optionalProtect, getRideById);
+
 router.patch("/:id/cancel", protect, requireRole("driver"), cancelRide);
 router.patch("/:id/complete", protect, requireRole("driver"), completeRideController);
 router.delete("/:id", protect, requireRole("driver"), deleteRideController);

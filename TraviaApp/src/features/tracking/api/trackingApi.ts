@@ -5,7 +5,13 @@ export const updateLocationApi = async (
   rideId: string,
   lat: number,
   lng: number
-): Promise<{ lat: number; lng: number; isDeviated: boolean; distanceFromRoute: number | null }> => {
+): Promise<{
+  lat: number;
+  lng: number;
+  isDeviated: boolean;
+  distanceFromRoute: number | null;
+  routeStatus?: "on_route" | "deviated";
+}> => {
   return apiClient(`/api/rides/${rideId}/location`, {
     method: "PATCH",
     body: JSON.stringify({ lat, lng }),
@@ -22,6 +28,7 @@ export const getDriverLocationApi = async (
   status: string;
   isDeviated?: boolean;
   distanceFromRoute?: number | null;
+  routeStatus?: "on_route" | "deviated";
 }> => {
   return apiClient(`/api/rides/${rideId}/location`);
 };

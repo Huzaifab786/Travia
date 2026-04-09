@@ -8,7 +8,9 @@ const links = [
   { href: "/users", label: "Users" },
   { href: "/drivers", label: "Drivers" },
   { href: "/rides", label: "Rides" },
+  { href: "/live-tracking", label: "Live Tracking" },
   { href: "/bookings", label: "Bookings" },
+  { href: "/pricing", label: "Pricing" },
 ];
 
 export default function AdminSidebar() {

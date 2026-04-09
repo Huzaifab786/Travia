@@ -2,7 +2,13 @@ const { searchPlaces, reverseGeocode } = require("../services/placeService");
 
 const searchPlacesController = async (req, res) => {
   const { q, focusLat, focusLng } = req.query;
-  const places = await searchPlaces(q, focusLat, focusLng);
+
+  const places = await searchPlaces(
+    q,
+    focusLat != null ? Number(focusLat) : undefined,
+    focusLng != null ? Number(focusLng) : undefined,
+  );
+
   return res.status(200).json({ places });
 };
 

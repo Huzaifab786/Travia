@@ -1,4 +1,5 @@
-﻿const adminService = require("../services/adminService");
+const adminService = require("../services/adminService");
+const pricingService = require("../services/pricingService");
 
 const getMe = async (req, res, next) => {
   try {
@@ -47,7 +48,21 @@ const getDriverDetail = async (req, res, next) => {
 
 const approveDriver = async (req, res, next) => {
   try {
-    const data = await adminService.approveDriver(req.params.id);
+    const data = await adminService.approveDriver(req.user.id, req.params.id);
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const suspendDriver = async (req, res, next) => {
+  try {
+    const { reason } = req.body;
+    const data = await adminService.suspendDriver(
+      req.user.id,
+      req.params.id,
+      reason,
+    );
     res.json(data);
   } catch (err) {
     next(err);
@@ -91,6 +106,26 @@ const getRideDetail = async (req, res, next) => {
   }
 };
 
+const getPricingSettings = async (req, res, next) => {
+  try {
+    const pricingSettings = await pricingService.getPricingSettings();
+    res.json({ pricingSettings });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const updatePricingSettings = async (req, res, next) => {
+  try {
+    const pricingSettings = await pricingService.updatePricingSettings(
+      req.body,
+    );
+    res.json({ pricingSettings });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getMe,
   getStats,
@@ -98,8 +133,11 @@ module.exports = {
   getAllDrivers,
   getDriverDetail,
   approveDriver,
+  suspendDriver,
   rejectDriver,
   getAllRides,
   getAllUsers,
   getRideDetail,
+  getPricingSettings,
+  updatePricingSettings,
 };

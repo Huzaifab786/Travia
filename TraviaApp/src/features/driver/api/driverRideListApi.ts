@@ -8,7 +8,7 @@ export type DriverRide = {
   price: number;
   seatsTotal: number;
   seatsAvailable: number;
-  status: "active" | "cancelled" | "completed";
+  status: "active" | "ready" | "in_progress" | "cancelled" | "completed";
   createdAt: string;
 
   analytics: {

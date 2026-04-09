@@ -63,6 +63,7 @@ export function VerifyOtpScreen() {
               name,
               phone,
               role: role!,
+              gender: data.user!.user_metadata?.gender,
             });
             await setToken(syncRes.token);
           } catch (syncError: any) {

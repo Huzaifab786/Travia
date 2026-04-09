@@ -5,6 +5,7 @@ const { protect } = require("../middlewares/authMiddleware");
 const { requireRole } = require("../middlewares/requireRole");
 const {
   createBooking,
+  quoteBooking,
   listMyBookings,
   listDriverRequests,
   updateBookingStatus,
@@ -13,6 +14,7 @@ const {
   deleteBookingController,
 } = require("../controllers/bookingController");
 
+router.post("/quote", protect, requireRole("passenger"), quoteBooking);
 router.post("/", protect, requireRole("passenger"), createBooking);
 router.get("/me", protect, requireRole("passenger"), listMyBookings);
 router.get("/driver/requests", protect, requireRole("driver"), listDriverRequests);

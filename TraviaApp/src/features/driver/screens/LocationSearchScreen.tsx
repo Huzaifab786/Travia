@@ -8,8 +8,13 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from "react-native";
+import {
+  useNavigation,
+  useRoute,
+  RouteProp,
+  StackActions,
+} from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { searchPlacesApi, PlaceSuggestion } from "../api/placeApi";
@@ -17,14 +22,21 @@ import { DriverStackParamList } from "../navigation/DriverNavigator";
 import { useTheme } from "../../../app/providers/ThemeProvider";
 import { radius, spacing, typography } from "../../../config/theme";
 
-type LocationSearchNavProp = NativeStackNavigationProp<DriverStackParamList, "LocationSearch">;
-type LocationSearchRouteProp = RouteProp<DriverStackParamList, "LocationSearch">;
+type LocationSearchNavProp = NativeStackNavigationProp<
+  DriverStackParamList,
+  "LocationSearch"
+>;
+type LocationSearchRouteProp = RouteProp<
+  DriverStackParamList,
+  "LocationSearch"
+>;
 
 export function LocationSearchScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation<LocationSearchNavProp>();
   const route = useRoute<LocationSearchRouteProp>();
-  const { onSelect, title } = route.params;
+
+  const { title, field, focusLat, focusLng } = route.params;
 
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
@@ -32,13 +44,14 @@ export function LocationSearchScreen() {
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
-    // Auto-focus input on mount
-    setTimeout(() => inputRef.current?.focus(), 100);
+    const timer = setTimeout(() => inputRef.current?.focus(), 100);
+    return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
     const timer = setTimeout(async () => {
       const trimmedQuery = query.trim();
+
       if (trimmedQuery.length < 3) {
         setSuggestions([]);
         return;
@@ -46,38 +59,46 @@ export function LocationSearchScreen() {
 
       try {
         setLoading(true);
-        const { focusLat, focusLng } = route.params as DriverStackParamList["LocationSearch"];
         const res = await searchPlacesApi(trimmedQuery, focusLat, focusLng);
         setSuggestions(res.places);
       } catch (err) {
         console.error("Search error:", err);
+        setSuggestions([]);
       } finally {
         setLoading(false);
       }
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, focusLat, focusLng]);
 
   const handleSelect = (place: PlaceSuggestion) => {
-    onSelect(place);
-    navigation.goBack();
+    navigation.dispatch(
+      StackActions.popTo("CreateRide", {
+        selectedField: field,
+        selectedPlace: place,
+      }),
+    );
   };
 
   const navigateToMap = () => {
     let initialLocation = undefined;
+
     if (suggestions.length > 0) {
-      initialLocation = { lat: suggestions[0].lat, lng: suggestions[0].lng };
-    } else if (route.params.focusLat && route.params.focusLng) {
-      initialLocation = { lat: route.params.focusLat, lng: route.params.focusLng };
+      initialLocation = {
+        lat: suggestions[0].lat,
+        lng: suggestions[0].lng,
+      };
+    } else if (focusLat != null && focusLng != null) {
+      initialLocation = {
+        lat: focusLat,
+        lng: focusLng,
+      };
     }
 
     navigation.navigate("MapPicker", {
+      field,
       initialLocation,
-      onSelect: (place) => {
-        onSelect(place);
-        navigation.goBack();
-      },
     });
   };
 
@@ -103,13 +124,19 @@ export function LocationSearchScreen() {
             style={s.input}
             placeholderTextColor={theme.textMuted}
           />
-          {loading && <ActivityIndicator style={s.loader} color={theme.primary} />}
+          {loading && (
+            <ActivityIndicator style={s.loader} color={theme.primary} />
+          )}
         </View>
 
         <Pressable onPress={navigateToMap} style={s.mapOption}>
           <Ionicons name="map-outline" size={24} color={theme.textPrimary} />
           <Text style={s.mapOptionText}>Choose on Map</Text>
-          <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+          <Ionicons
+            name="chevron-forward"
+            size={20}
+            color={theme.textMuted}
+          />
         </Pressable>
 
         <FlatList
@@ -125,7 +152,11 @@ export function LocationSearchScreen() {
           renderItem={({ item }) => (
             <Pressable onPress={() => handleSelect(item)} style={s.item}>
               <View style={s.itemContent}>
-                <Ionicons name="location-outline" size={20} color={theme.textSecondary} />
+                <Ionicons
+                  name="location-outline"
+                  size={20}
+                  color={theme.textSecondary}
+                />
                 <Text style={s.itemLabel}>{item.label}</Text>
               </View>
             </Pressable>
@@ -179,7 +210,7 @@ function makeStyles(theme: any) {
     },
     loader: {
       position: "absolute",
-      right: spacing.xl + spacing.xs, // offset right slightly
+      right: spacing.xl + spacing.xs,
     },
     mapOption: {
       flexDirection: "row",

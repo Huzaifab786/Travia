@@ -1,8 +1,21 @@
 import { apiClient } from "../../../lib/api/client";
+import type { BookingQuote } from "../../bookings/api/bookingApi";
+import type { PlaceSuggestion } from "./placeApi";
 
 export type DriverBookingRequest = {
   id: string;
   seatsRequested: number;
+  meetupPoint?: {
+    id: string;
+    label: string;
+    lat: number;
+    lng: number;
+    address?: string;
+    order?: number;
+  } | null;
+  passengerPickup?: PlaceSuggestion | null;
+  passengerDropoff?: PlaceSuggestion | null;
+  pricingQuote?: BookingQuote | null;
   status: "pending" | "accepted" | "rejected" | "cancelled";
   createdAt: string;
   passenger: {
@@ -15,6 +28,13 @@ export type DriverBookingRequest = {
     dropoff: { address: string };
     departureTime: string;
     price: number;
+    meetupPoints?: Array<{
+      id: string;
+      label: string;
+      lat: number;
+      lng: number;
+      order: number;
+    }> | null;
   };
 };
 

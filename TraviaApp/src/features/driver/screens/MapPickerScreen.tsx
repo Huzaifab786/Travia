@@ -8,7 +8,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, { Region } from "react-native-maps";
-import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
+import {
+  useNavigation,
+  useRoute,
+  RouteProp,
+  StackActions,
+} from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { reverseGeocodeApi } from "../api/placeApi";
@@ -16,14 +21,18 @@ import { DriverStackParamList } from "../navigation/DriverNavigator";
 import { useTheme } from "../../../app/providers/ThemeProvider";
 import { radius, spacing, typography } from "../../../config/theme";
 
-type MapPickerNavProp = NativeStackNavigationProp<DriverStackParamList, "MapPicker">;
+type MapPickerNavProp = NativeStackNavigationProp<
+  DriverStackParamList,
+  "MapPicker"
+>;
 type MapPickerRouteProp = RouteProp<DriverStackParamList, "MapPicker">;
 
 export function MapPickerScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation<MapPickerNavProp>();
   const route = useRoute<MapPickerRouteProp>();
-  const { onSelect, initialLocation } = route.params as DriverStackParamList["MapPicker"];
+
+  const { initialLocation, field } = route.params;
 
   const [region, setRegion] = useState<Region>({
     latitude: initialLocation?.lat || 24.8607,
@@ -40,12 +49,13 @@ export function MapPickerScreen() {
     lng: number;
   } | null>(null);
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchAddress = async (lat: number, lng: number) => {
     try {
       setLoading(true);
       const res = await reverseGeocodeApi(lat, lng);
+
       if (res.place) {
         setAddress(res.place.label);
         setSelectedPlace({
@@ -56,7 +66,7 @@ export function MapPickerScreen() {
       } else {
         setAddress("Unknown location");
       }
-    } catch (err) {
+    } catch {
       setAddress("Error fetching address");
     } finally {
       setLoading(false);
@@ -65,28 +75,33 @@ export function MapPickerScreen() {
 
   const onRegionChangeComplete = (newRegion: Region) => {
     setRegion(newRegion);
+
     if (timerRef.current) clearTimeout(timerRef.current);
-    
-    // Debounce reverse geocoding to avoid excessive API calls
+
     timerRef.current = setTimeout(() => {
       fetchAddress(newRegion.latitude, newRegion.longitude);
-    }, 400); // Reduced delay for more responsive feel
+    }, 400);
   };
 
   const handleConfirm = () => {
-    if (selectedPlace) {
-      onSelect({
-        id: `${selectedPlace.lat}-${selectedPlace.lng}`,
-        label: selectedPlace.label,
-        lat: selectedPlace.lat,
-        lng: selectedPlace.lng,
-      });
-      navigation.goBack();
-    }
+    if (!selectedPlace) return;
+
+    navigation.dispatch(
+      StackActions.popTo("CreateRide", {
+        selectedField: field,
+        selectedPlace: {
+          id: `${selectedPlace.lat}-${selectedPlace.lng}`,
+          label: selectedPlace.label,
+          lat: selectedPlace.lat,
+          lng: selectedPlace.lng,
+        },
+      }),
+    );
   };
 
   useEffect(() => {
     fetchAddress(region.latitude, region.longitude);
+
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
@@ -121,8 +136,13 @@ export function MapPickerScreen() {
           {loading ? (
             <ActivityIndicator size="small" color={theme.primary} />
           ) : (
-            <Ionicons name="location-outline" size={20} color={theme.textSecondary} />
+            <Ionicons
+              name="location-outline"
+              size={20}
+              color={theme.textSecondary}
+            />
           )}
+
           <Text style={s.addressText} numberOfLines={2}>
             {address}
           </Text>
@@ -176,7 +196,7 @@ function makeStyles(theme: any) {
     markerFixed: {
       position: "absolute",
       top: "50%",
-      marginTop: -40, // Offset to center the icon tip
+      marginTop: -40,
       shadowColor: "#000",
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.3,

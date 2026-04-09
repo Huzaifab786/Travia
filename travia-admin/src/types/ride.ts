@@ -1,4 +1,9 @@
-export type AdminRideStatus = "active" | "completed" | "cancelled";
+export type AdminRideStatus =
+  | "active"
+  | "ready"
+  | "in_progress"
+  | "completed"
+  | "cancelled";
 
 export type AdminRide = {
   id: string;
@@ -8,6 +13,7 @@ export type AdminRide = {
   price: number;
   status: AdminRideStatus;
   seatsTotal: number;
+  femaleOnly?: boolean;
   createdAt: string;
   driver: {
     id: string;
@@ -17,6 +23,9 @@ export type AdminRide = {
   _count: {
     bookings: number;
   };
+  currentLat?: number | null;
+  currentLng?: number | null;
+  lastUpdate?: string | null;
 };
 
 export type GetAdminRidesResponse = {
@@ -42,7 +51,8 @@ export type AdminRideVehicle = {
   carType: string | null;
   engineCC: number | null;
   avgKmPerLitre: number;
-  fuelPricePerLitre: number;
+  vehicleNumber: string | null;
+  carImageUrl: string | null;
 };
 
 export type AdminRideDetail = {
@@ -57,6 +67,7 @@ export type AdminRideDetail = {
   price: number;
   seatsTotal: number;
   status: AdminRideStatus;
+  femaleOnly?: boolean;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -65,6 +76,7 @@ export type AdminRideDetail = {
   currentLat: number | null;
   currentLng: number | null;
   lastUpdate: string | null;
+  encodedPolyline?: string | null;
   driver: {
     id: string;
     name: string;

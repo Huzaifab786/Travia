@@ -152,7 +152,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-col gap-6">
-      <section className="overflow-hidden rounded-[2rem] border border-white/70 bg-white/80 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur">
+      <section className="overflow-hidden rounded-4xl border border-white/70 bg-white/80 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur">
         <div className="flex flex-col gap-8 p-6 sm:p-8 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl space-y-4">
             <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-slate-600">
@@ -194,7 +194,7 @@ export default function Home() {
           {statCards.map((card) => (
             <div
               key={card.key}
-              className="rounded-[1.5rem] border border-slate-200/80 bg-white/85 p-5 shadow-sm"
+              className="rounded-3xl border border-slate-200/80 bg-white/85 p-5 shadow-sm"
             >
               <div className="h-3 w-28 animate-pulse rounded-full bg-slate-200" />
               <div className="mt-4 h-10 w-20 animate-pulse rounded-2xl bg-slate-200" />
@@ -206,7 +206,7 @@ export default function Home() {
       )}
 
       {status === "error" && (
-        <section className="rounded-[1.5rem] border border-rose-200 bg-rose-50 p-5 text-rose-900">
+        <section className="rounded-3xl border border-rose-200 bg-rose-50 p-5 text-rose-900">
           <h2 className="text-lg font-semibold">Unable to load stats</h2>
           <p className="mt-2 text-sm leading-6">{error}</p>
         </section>
@@ -217,7 +217,7 @@ export default function Home() {
           {summary.map((card) => (
             <article
               key={card.key}
-              className="rounded-[1.5rem] border border-slate-200/80 bg-white/90 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              className="rounded-3xl border border-slate-200/80 bg-white/90 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
             >
               <p className="text-sm font-medium text-slate-500">{card.label}</p>
               <p className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">

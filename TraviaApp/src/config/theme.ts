@@ -1,34 +1,33 @@
 // Travia Design System — theme.ts
-// Deep Navy + Electric Emerald palette, supports Light & Dark mode
+// Dark Navy + Electric Emerald palette (premium, modern, high-contrast)
 
 export const palette = {
-  // Core brand — slightly brighter for better pop on dark backgrounds
-  emerald: '#00D4A0',
-  emeraldDark: '#00A87E',
-  emeraldLight: '#CCFAEE',
-  emeraldSubtle: '#E6FDF5',
+  // Core brand — Electric Emerald
+  emerald: '#10B981',
+  emeraldDark: '#047857',
+  emeraldLight: '#A7F3D0',
+  emeraldSubtle: '#064E3B', // For subtle dark backgrounds
 
-  // Neutrals — truer navy with more distinct steps
-  navy: '#0C1120',
-  navyMid: '#131926',
-  navySurface: '#1C2840',
-  navyBorder: '#293857',
+  // Neutrals — Deep Dark Navy
+  navy: '#0B1120',
+  navyMid: '#111827',
+  navySurface: '#1F2937',
+  navyBorder: '#374151',
 
-  // Amber accent (price, ratings)
+  // Amber accent
   amber: '#F59E0B',
   amberLight: '#FEF3C7',
 
   // Semantic
   danger: '#EF4444',
-  dangerLight: '#FEF2F2',
+  dangerLight: '#FEE2E2',
   success: '#10B981',
-  successLight: '#ECFDF5',
+  successLight: '#D1FAE5',
   warning: '#F59E0B',
-  warningLight: '#FFFBEB',
+  warningLight: '#FEF9C3',
 
-  // Text (absolute)
   white: '#FFFFFF',
-  black: '#0C1120',
+  black: '#000000',
 };
 
 export type Theme = typeof darkTheme;
@@ -36,64 +35,64 @@ export type Theme = typeof darkTheme;
 export const darkTheme = {
   dark: true,
 
-  // Backgrounds — more contrast between steps
-  background: '#0C1120',
-  surface: '#131926',
-  surfaceElevated: '#1C2840',
-  border: '#293857',
+  // Backgrounds — clear hierarchy
+  background: '#0B1120',           // deep navy
+  surface: '#111827',              // mid navy
+  surfaceElevated: '#1F2937',      // elevated navy
+  border: '#374151',
 
-  // Text — better readability on dark navy
-  textPrimary: '#F0F4FF',         // slightly warm white is easier to read
-  textSecondary: '#8D9BB5',       // more blue-tinted for harmony
-  textMuted: '#5A6A80',           // lighter than before (was too dark)
-  textInverse: '#0C1120',
+  // Text — high contrast on dark
+  textPrimary: '#F8FAFC',          // very bright text
+  textSecondary: '#94A3B8',        // slate-400
+  textMuted: '#64748B',            // slate-500
+  textInverse: '#0B1120',
 
-  // Brand — slightly brighter for more pop
-  primary: '#00D4A0',
-  primaryDark: '#00A87E',
-  primaryLight: '#CCFAEE',
-  primarySubtle: '#0C2E24',
+  // Brand — Electric Emerald
+  primary: '#10B981',
+  primaryDark: '#047857',
+  primaryLight: '#34D399',
+  primarySubtle: '#064E3B',        // dark tinted emerald for glow/glass
 
-  // Semantic
+  // Semantic backgrounds
   danger: '#EF4444',
-  dangerBg: '#2C1A1A',
+  dangerBg: '#450A0A',
   success: '#10B981',
-  successBg: '#0C2A20',
+  successBg: '#064E3B',
   amber: '#F59E0B',
-  amberBg: '#2A2108',
+  amberBg: '#451A03',
 
   // Tab bar
-  tabBarBg: '#0C1120',
-  tabBarBorder: '#1C2840',
-  tabBarActive: '#00D4A0',
-  tabBarInactive: '#5A6A80',
+  tabBarBg: '#0B1120',
+  tabBarBorder: '#1F2937',
+  tabBarActive: '#10B981',
+  tabBarInactive: '#64748B',
 
-  // Card shadow — visible on dark bg
+  // Card shadow
   shadowColor: '#000000',
 };
 
 export const lightTheme: Theme = {
   dark: false,
 
-  // Backgrounds
-  background: '#F3F6FA',
+  // Backgrounds — airy, clean
+  background: '#F8FAFC',
   surface: '#FFFFFF',
-  surfaceElevated: '#EEF2F8',
-  border: '#DDE3EE',
+  surfaceElevated: '#F1F5F9',
+  border: '#E2E8F0',
 
-  // Text — better contrast on light bg
-  textPrimary: '#0C1120',
-  textSecondary: '#556070',       // darker than before for better contrast
-  textMuted: '#8492A6',
+  // Text — strong contrast on light
+  textPrimary: '#0F172A',
+  textSecondary: '#334155',
+  textMuted: '#64748B',
   textInverse: '#FFFFFF',
 
-  // Brand — slightly deeper for WCAG AA on white
-  primary: '#009970',
-  primaryDark: '#007A58',
-  primaryLight: '#CCFAEE',
-  primarySubtle: '#E6FDF5',
+  // Brand — Electric Emerald (slightly darker for WCAG AA on white)
+  primary: '#059669',
+  primaryDark: '#047857',
+  primaryLight: '#6EE7B7',
+  primarySubtle: '#D1FAE5',
 
-  // Semantic
+  // Semantic backgrounds
   danger: '#DC2626',
   dangerBg: '#FEF2F2',
   success: '#059669',
@@ -103,16 +102,18 @@ export const lightTheme: Theme = {
 
   // Tab bar
   tabBarBg: '#FFFFFF',
-  tabBarBorder: '#DDE3EE',
-  tabBarActive: '#009970',
-  tabBarInactive: '#8492A6',
+  tabBarBorder: '#E2E8F0',
+  tabBarActive: '#059669',
+  tabBarInactive: '#94A3B8',
 
   // Card shadow
-  shadowColor: '#4A5568',
+  shadowColor: '#0F172A',
 };
 
+// Import responsive utilities (keep as-is)
 import { nf, wp } from "../lib/utils/responsive";
 
+// Typography — unchanged
 export const typography = {
   hero:         { fontSize: nf(36), fontWeight: '800' as const, letterSpacing: -0.5 },
   h1:           { fontSize: nf(28), fontWeight: '800' as const, letterSpacing: -0.3 },
@@ -127,7 +128,7 @@ export const typography = {
   label:        { fontSize: nf(11), fontWeight: '700' as const, letterSpacing: 0.6 },
 };
 
-// Spacing scale (4px base)
+// Spacing scale — unchanged
 export const spacing = {
   xs:   wp(4),
   sm:   wp(8),
@@ -140,14 +141,12 @@ export const spacing = {
   '5xl': wp(56),
 };
 
-// Border radius
+// Border radius — unchanged
 export const radius = {
   sm:   wp(8),
   md:   wp(12),
   lg:   wp(16),
-
   xl:   wp(20),
   '2xl': wp(24),
   full: 999,
 };
-

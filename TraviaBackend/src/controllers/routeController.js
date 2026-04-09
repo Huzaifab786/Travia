@@ -1,5 +1,8 @@
 const prisma = require("../config/db");
-const { getRouteBetweenPoints } = require("../services/routeService");
+const {
+  getRouteBetweenPoints,
+  getRouteAlternativesBetweenPoints,
+} = require("../services/routeService");
 
 const getRideRoute = async (req, res) => {
   const { rideId } = req.params;
@@ -43,12 +46,15 @@ const previewRoute = async (req, res) => {
     });
   }
 
-  const route = await getRouteBetweenPoints(
+  const routes = await getRouteAlternativesBetweenPoints(
     { lat: startLat, lng: startLng },
     { lat: endLat, lng: endLng }
   );
 
-  return res.status(200).json(route);
+  return res.status(200).json({
+    route: routes[0],
+    routes,
+  });
 };
 
 module.exports = { getRideRoute, previewRoute };

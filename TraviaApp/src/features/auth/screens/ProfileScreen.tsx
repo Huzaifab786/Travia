@@ -1,4 +1,4 @@
-import React, { useContext, useState } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -15,14 +15,23 @@ import { Ionicons } from "@expo/vector-icons";
 import { AuthContext } from "../../../app/providers/AuthProvider";
 import { useTheme } from "../../../app/providers/ThemeProvider";
 import { radius, spacing, typography } from "../../../config/theme";
+import { supabase } from "../../../config/supabaseClient";
+import { syncUserApi } from "../api/authApi";
+import type { UserGender } from "../types/auth";
 
 export function ProfileScreen() {
   const { theme, isDark, toggleTheme } = useTheme();
-  const { user, role, setToken } = useContext(AuthContext);
+  const { user, role, setToken, setUser } = useContext(AuthContext);
 
-  const [editingName, setEditingName] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.user_metadata?.full_name ?? "User");
+  const [gender, setGender] = useState<UserGender | "">(user?.user_metadata?.gender ?? "");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setName(user?.user_metadata?.full_name ?? "User");
+    setGender(user?.user_metadata?.gender ?? "");
+  }, [user]);
 
   const displayInitial = name?.charAt(0)?.toUpperCase() ?? "U";
 
@@ -37,17 +46,46 @@ export function ProfileScreen() {
     ]);
   };
 
-  const onSaveName = async () => {
-    if (!name.trim()) {
+  const onSaveProfile = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
       Alert.alert("Error", "Name cannot be empty");
       return;
     }
+    if (!gender) {
+      Alert.alert("Error", "Please select your gender");
+      return;
+    }
+
     setSaving(true);
-    // TODO: call API to update name
-    await new Promise((r) => setTimeout(r, 800));
-    setSaving(false);
-    setEditingName(false);
-    Alert.alert("Success", "Name updated successfully");
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        data: {
+          full_name: trimmedName,
+          gender,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        setUser(data.user);
+        await syncUserApi({
+          supabaseId: data.user.id,
+          email: data.user.email!,
+          name: trimmedName,
+          role: role ?? "passenger",
+          gender,
+        });
+      }
+
+      setEditing(false);
+      Alert.alert("Success", "Profile updated successfully");
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Failed to update profile");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const s = makeStyles(theme);
@@ -55,36 +93,60 @@ export function ProfileScreen() {
   return (
     <SafeAreaView style={s.safeArea}>
       <ScrollView contentContainerStyle={s.container} showsVerticalScrollIndicator={false}>
-
-        {/* Header */}
         <View style={s.headerCard}>
           <View style={s.avatarCircle}>
             <Text style={s.avatarText}>{displayInitial}</Text>
           </View>
 
-          {editingName ? (
-            <View style={s.nameEditRow}>
-              <TextInput
-                style={s.nameInput}
-                value={name}
-                onChangeText={setName}
-                autoFocus
-                placeholder="Your name"
-                placeholderTextColor={theme.textMuted}
-              />
-              <Pressable onPress={onSaveName} style={s.saveBtn} disabled={saving}>
-                {saving ? (
-                  <ActivityIndicator size="small" color={theme.textInverse} />
-                ) : (
-                  <Text style={s.saveBtnText}>Save</Text>
-                )}
-              </Pressable>
-              <Pressable onPress={() => setEditingName(false)} style={s.cancelBtn}>
-                <Ionicons name="close" size={18} color={theme.textSecondary} />
-              </Pressable>
+          {editing ? (
+            <View style={s.editGroup}>
+              <View style={s.nameEditRow}>
+                <TextInput
+                  style={s.nameInput}
+                  value={name}
+                  onChangeText={setName}
+                  autoFocus
+                  placeholder="Your name"
+                  placeholderTextColor={theme.textMuted}
+                />
+                <Pressable onPress={onSaveProfile} style={s.saveBtn} disabled={saving}>
+                  {saving ? (
+                    <ActivityIndicator size="small" color={theme.textInverse} />
+                  ) : (
+                    <Text style={s.saveBtnText}>Save</Text>
+                  )}
+                </Pressable>
+                <Pressable onPress={() => setEditing(false)} style={s.cancelBtn}>
+                  <Ionicons name="close" size={18} color={theme.textSecondary} />
+                </Pressable>
+              </View>
+
+              <View style={s.genderEditor}>
+                <Text style={s.genderLabel}>Gender</Text>
+                <View style={s.genderRow}>
+                  {[
+                    { key: "male", label: "Male" },
+                    { key: "female", label: "Female" },
+                    { key: "other", label: "Other" },
+                  ].map((item) => {
+                    const active = gender === item.key;
+                    return (
+                      <Pressable
+                        key={item.key}
+                        onPress={() => setGender(item.key as UserGender)}
+                        style={[s.genderChip, active && s.genderChipActive]}
+                      >
+                        <Text style={[s.genderChipText, active && s.genderChipTextActive]}>
+                          {item.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
             </View>
           ) : (
-            <Pressable onPress={() => setEditingName(true)} style={s.nameRow}>
+            <Pressable onPress={() => setEditing(true)} style={s.nameRow}>
               <Text style={s.userName}>{name}</Text>
               <Ionicons name="pencil-outline" size={16} color={theme.primary} />
             </Pressable>
@@ -99,16 +161,15 @@ export function ProfileScreen() {
             <Text style={s.roleText}>{role?.toUpperCase()}</Text>
           </View>
 
-          <Text style={s.emailText}>{user?.email ?? "—"}</Text>
+          <Text style={s.emailText}>{user?.email ?? "-"}</Text>
         </View>
 
-        {/* Account Info */}
         <Text style={s.sectionLabel}>ACCOUNT</Text>
         <View style={s.card}>
           <InfoRow
             icon="mail-outline"
             label="Email"
-            value={user?.email ?? "—"}
+            value={user?.email ?? "-"}
             locked
             theme={theme}
           />
@@ -124,13 +185,20 @@ export function ProfileScreen() {
           <InfoRow
             icon="shield-checkmark-outline"
             label="Account Role"
-            value={role ? role.charAt(0).toUpperCase() + role.slice(1) : "—"}
+            value={role ? role.charAt(0).toUpperCase() + role.slice(1) : "-"}
             locked
+            theme={theme}
+          />
+          <Divider theme={theme} />
+          <InfoRow
+            icon="male-female-outline"
+            label="Gender"
+            value={gender ? gender.charAt(0).toUpperCase() + gender.slice(1) : "Not set"}
+            locked={!editing}
             theme={theme}
           />
         </View>
 
-        {/* Preferences */}
         <Text style={s.sectionLabel}>PREFERENCES</Text>
         <View style={s.card}>
           <View style={s.settingRow}>
@@ -149,7 +217,6 @@ export function ProfileScreen() {
           </View>
         </View>
 
-        {/* Danger Zone */}
         <Text style={s.sectionLabel}>ACCOUNT ACTIONS</Text>
         <View style={s.card}>
           <Pressable style={s.dangerRow} onPress={onLogout}>
@@ -157,28 +224,55 @@ export function ProfileScreen() {
               <Ionicons name="log-out-outline" size={18} color={theme.danger} />
             </View>
             <Text style={s.dangerText}>Logout</Text>
-            <Ionicons name="chevron-forward" size={18} color={theme.danger} style={{ marginLeft: "auto" }} />
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={theme.danger}
+              style={{ marginLeft: "auto" }}
+            />
           </Pressable>
         </View>
 
-        <Text style={s.footer}>Travia v1.0.0 · FYP Project</Text>
+        <Text style={s.footer}>Travia v1.0.0 - FYP Project</Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 function InfoRow({
-  icon, label, value, locked, theme,
+  icon,
+  label,
+  value,
+  locked,
+  theme,
 }: {
-  icon: any; label: string; value: string; locked?: boolean; theme: any;
+  icon: any;
+  label: string;
+  value: string;
+  locked?: boolean;
+  theme: any;
 }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 14 }}>
-      <View style={[{ width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center", marginRight: 12 }, { backgroundColor: theme.primarySubtle }]}>
+      <View
+        style={[
+          {
+            width: 36,
+            height: 36,
+            borderRadius: 10,
+            justifyContent: "center",
+            alignItems: "center",
+            marginRight: 12,
+          },
+          { backgroundColor: theme.primarySubtle },
+        ]}
+      >
         <Ionicons name={icon} size={18} color={theme.primary} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: "500", marginBottom: 2 }}>{label}</Text>
+        <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: "500", marginBottom: 2 }}>
+          {label}
+        </Text>
         <Text style={{ fontSize: 15, color: theme.textPrimary, fontWeight: "600" }}>{value}</Text>
       </View>
       {locked && <Ionicons name="lock-closed-outline" size={14} color={theme.textMuted} />}
@@ -226,14 +320,19 @@ function makeStyles(theme: any) {
       marginBottom: spacing.sm,
     },
     userName: { ...typography.h2, color: theme.textPrimary },
+    editGroup: {
+      width: "100%",
+    },
     nameEditRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.sm,
       marginBottom: spacing.sm,
+      flexWrap: "wrap",
     },
     nameInput: {
       flex: 1,
+      minWidth: 180,
       backgroundColor: theme.surfaceElevated,
       borderWidth: 1,
       borderColor: theme.primary,
@@ -253,6 +352,40 @@ function makeStyles(theme: any) {
     },
     saveBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },
     cancelBtn: { padding: 4 },
+    genderEditor: {
+      marginTop: spacing.sm,
+    },
+    genderLabel: {
+      ...typography.caption,
+      color: theme.textMuted,
+      marginBottom: spacing.sm,
+      fontWeight: "700",
+      textTransform: "uppercase",
+      letterSpacing: 0.6,
+    },
+    genderRow: { flexDirection: "row", gap: 8 },
+    genderChip: {
+      flex: 1,
+      minHeight: 42,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    genderChipActive: {
+      backgroundColor: theme.primarySubtle,
+      borderColor: theme.primary,
+    },
+    genderChipText: {
+      color: theme.textSecondary,
+      fontWeight: "600",
+      fontSize: 13,
+    },
+    genderChipTextActive: {
+      color: theme.primary,
+    },
     roleBadge: {
       flexDirection: "row",
       alignItems: "center",
@@ -288,7 +421,13 @@ function makeStyles(theme: any) {
       paddingVertical: 14,
     },
     settingLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
-    settingIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+    settingIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      justifyContent: "center",
+      alignItems: "center",
+    },
     settingLabel: { ...typography.bodyMedium, color: theme.textPrimary },
     dangerRow: {
       flexDirection: "row",
@@ -297,6 +436,11 @@ function makeStyles(theme: any) {
       gap: 12,
     },
     dangerText: { ...typography.bodyMedium, color: theme.danger },
-    footer: { textAlign: "center", ...typography.caption, color: theme.textMuted, marginTop: spacing.xl },
+    footer: {
+      textAlign: "center",
+      ...typography.caption,
+      color: theme.textMuted,
+      marginTop: spacing.xl,
+    },
   });
 }

@@ -11,25 +11,50 @@ import { Ionicons } from "@expo/vector-icons";
 import { VehicleDetailsScreen } from "../screens/VehicleDetailsScreen";
 import { DriverVerificationScreen } from "../screens/DriverVerificationScreen";
 import { ProfileScreen } from "../../auth/screens/ProfileScreen";
+import { DriverLiveRideScreen } from "../screens/DriverLiveRideScreen";
 import { ThemeContext } from "../../../app/providers/ThemeProvider";
 
 export type DriverStackParamList = {
   DriverTabs: undefined;
   DriverHome: undefined;
   MyRides: undefined;
-  CreateRide: undefined;
+  CreateRide:
+    | {
+        selectedPlace?: PlaceSuggestion;
+        selectedField?: "pickup" | "dropoff";
+      }
+    | undefined;
   VehicleDetails: undefined;
   DriverVerification: undefined;
   Profile: undefined;
   LocationSearch: {
-    onSelect: (place: PlaceSuggestion) => void;
+    field: "pickup" | "dropoff";
     title?: string;
     focusLat?: number;
     focusLng?: number;
   };
   MapPicker: {
-    onSelect: (place: PlaceSuggestion) => void;
+    field: "pickup" | "dropoff";
     initialLocation?: { lat: number; lng: number };
+  };
+  DriverLiveRide: {
+    rideId: string;
+    pickupLat: number;
+    pickupLng: number;
+    dropoffLat: number;
+    dropoffLng: number;
+    encodedPolyline?: any;
+    passengerName?: string | null;
+    passengerPhone?: string | null;
+    meetupPoint?: {
+      id: string;
+      label: string;
+      lat: number;
+      lng: number;
+      address?: string | null;
+      order?: number;
+      source?: string;
+    } | null;
   };
 };
 
@@ -125,6 +150,11 @@ export function DriverNavigator() {
       <Stack.Screen
         name="DriverVerification"
         component={DriverVerificationScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="DriverLiveRide"
+        component={DriverLiveRideScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

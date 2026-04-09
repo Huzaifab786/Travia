@@ -1,5 +1,10 @@
-﻿const prisma = require("../config/db");
+const prisma = require("../config/db");
 const supabaseAdmin = require("../config/supabaseAdmin");
+const {
+  getDriverVerificationDetail,
+  reviewDriverVerification,
+  formatVerification,
+} = require("./driverVerificationService");
 
 const getCurrentAdmin = async (adminId) => {
   const user = await prisma.user.findUnique({
@@ -33,7 +38,7 @@ const getStats = async () => {
     prisma.user.count(),
     prisma.user.count({ where: { role: "driver" } }),
     prisma.ride.count(),
-    prisma.user.count({ where: { role: "driver", driverStatus: "pending" } }),
+    prisma.driverVerification.count({ where: { adminDecision: "pending" } }),
     prisma.booking.count(),
   ]);
 
@@ -46,12 +51,16 @@ const getStats = async () => {
   };
 };
 
-/** Get all drivers with pending verification */
+/** Get all drivers waiting for admin review */
 const getPendingDrivers = async () => {
   const drivers = await prisma.user.findMany({
     where: {
       role: "driver",
-      driverStatus: { in: ["pending", "unverified"] },
+      driverVerification: {
+        is: {
+          adminDecision: "pending",
+        },
+      },
     },
     select: {
       id: true,
@@ -60,14 +69,49 @@ const getPendingDrivers = async () => {
       phone: true,
       driverStatus: true,
       createdAt: true,
-      driverDocuments: {
-        select: { id: true, type: true, url: true, createdAt: true },
-        orderBy: { createdAt: "desc" },
+      driverRejectionReason: true,
+      driverVerification: {
+        select: {
+          id: true,
+          userId: true,
+          autoDecision: true,
+          autoReason: true,
+          autoResult: true,
+          adminDecision: true,
+          adminReason: true,
+          reviewedByAdminId: true,
+          reviewedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          documents: {
+            select: {
+              id: true,
+              category: true,
+              side: true,
+              type: true,
+              url: true,
+              createdAt: true,
+              ocrResult: true,
+              ocrStatus: true,
+              ocrReason: true,
+            },
+            orderBy: [
+              { category: "asc" },
+              { side: "asc" },
+            ],
+          },
+        },
       },
     },
     orderBy: { createdAt: "desc" },
   });
-  return { drivers };
+
+  return {
+    drivers: drivers.map((driver) => ({
+      ...driver,
+      driverVerification: formatVerification(driver.driverVerification),
+    })),
+  };
 };
 
 /** Get all drivers (any status) */
@@ -80,61 +124,46 @@ const getAllDrivers = async () => {
       email: true,
       phone: true,
       driverStatus: true,
+      driverRejectionReason: true,
       createdAt: true,
       _count: { select: { rides: true, driverDocuments: true } },
+      driverVerification: {
+        select: {
+          autoDecision: true,
+          autoReason: true,
+          adminDecision: true,
+          adminReason: true,
+          reviewedAt: true,
+        },
+      },
     },
     orderBy: { createdAt: "desc" },
   });
-  return { drivers };
+
+  return {
+    drivers: drivers.map((driver) => ({
+      ...driver,
+      driverVerification: formatVerification(driver.driverVerification),
+    })),
+  };
 };
 
 /** Get a single driver with their documents */
 const getDriverWithDocuments = async (driverId) => {
-  const driver = await prisma.user.findUnique({
-    where: { id: driverId },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      role: true,
-      driverStatus: true,
-      createdAt: true,
-      driverDocuments: {
-        select: { id: true, type: true, url: true, createdAt: true },
-        orderBy: { createdAt: "asc" },
-      },
-      vehicle: {
-        select: { carModel: true, carType: true, engineCC: true },
-      },
-      _count: { select: { rides: true } },
-    },
-  });
-
-  if (!driver || driver.role !== "driver") {
-    const err = new Error("Driver not found");
-    err.statusCode = 404;
-    throw err;
-  }
-
-  return { driver };
+  return getDriverVerificationDetail(driverId);
 };
 
 /** Approve a driver */
-const approveDriver = async (driverId) => {
-  const user = await prisma.user.update({
-    where: { id: driverId },
-    data: {
-      driverStatus: "verified",
-      driverRejectionReason: null,
-    },
-    select: { id: true, name: true, driverStatus: true },
-  });
-
-  return { message: `Driver ${user.name} approved successfully`, driver: user };
+const approveDriver = async (adminId, driverId) => {
+  return reviewDriverVerification(adminId, driverId, "approve");
 };
 
-/** Reject a driver with an optional reason */
+/** Suspend a driver */
+const suspendDriver = async (adminId, driverId, reason) => {
+  return reviewDriverVerification(adminId, driverId, "suspend", reason);
+};
+
+/** Reject a driver with an optional reason and remove files */
 const rejectDriver = async (driverId, reason) => {
   const driver = await prisma.user.findUnique({
     where: { id: driverId },
@@ -179,6 +208,10 @@ const rejectDriver = async (driverId, reason) => {
       where: { userId: driverId },
     });
 
+    await tx.driverVerification.deleteMany({
+      where: { userId: driverId },
+    });
+
     return tx.user.update({
       where: { id: driverId },
       data: {
@@ -216,7 +249,11 @@ const getAllRides = async (status) => {
       price: true,
       status: true,
       seatsTotal: true,
+      femaleOnly: true,
       createdAt: true,
+      currentLat: true,
+      currentLng: true,
+      lastUpdate: true,
       driver: { select: { id: true, name: true, email: true } },
       _count: { select: { bookings: true } },
     },
@@ -258,11 +295,13 @@ const getRideDetail = async (rideId) => {
       price: true,
       seatsTotal: true,
       status: true,
+      femaleOnly: true,
       notes: true,
       createdAt: true,
       updatedAt: true,
       distanceMeters: true,
       durationSeconds: true,
+      encodedPolyline: true,
       currentLat: true,
       currentLng: true,
       lastUpdate: true,
@@ -273,17 +312,18 @@ const getRideDetail = async (rideId) => {
           email: true,
           phone: true,
           driverStatus: true,
-          vehicle: {
-            select: {
-              id: true,
-              carModel: true,
-              carType: true,
-              engineCC: true,
-              avgKmPerLitre: true,
-              fuelPricePerLitre: true,
+            vehicle: {
+              select: {
+                id: true,
+                carModel: true,
+                carType: true,
+                engineCC: true,
+                avgKmPerLitre: true,
+                vehicleNumber: true,
+                carImageUrl: true,
+              },
             },
           },
-        },
       },
       bookings: {
         select: {
@@ -327,6 +367,7 @@ module.exports = {
   getAllDrivers,
   getDriverWithDocuments,
   approveDriver,
+  suspendDriver,
   rejectDriver,
   getAllRides,
   getAllUsers,

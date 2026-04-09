@@ -1,20 +1,36 @@
 import React, { useContext } from "react";
-import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import {
+  createNativeStackNavigator,
+  NativeStackScreenProps,
+} from "@react-navigation/native-stack";
+import {
+  createBottomTabNavigator,
+  BottomTabScreenProps,
+} from "@react-navigation/bottom-tabs";
+import { NavigatorScreenParams, CompositeScreenProps } from "@react-navigation/native";
 import { PassengerHomeScreen } from "../screens/PassengerHomeScreen";
 import { RideDetailsScreen } from "../screens/RideDetailsScreen";
 import { LiveRideScreen } from "../screens/LiveRideScreen";
 import { MyBookingsScreen } from "../../bookings/screens/MyBookingsScreen";
+import { PassengerLocationSearchScreen } from "../screens/PassengerLocationSearchScreen";
+import { PassengerMapPickerScreen } from "../screens/PassengerMapPickerScreen";
 import type { Ride } from "../api/rideApi";
+import type { PlaceSuggestion } from "../../driver/api/placeApi";
 import { Ionicons } from "@expo/vector-icons";
 import { ProfileScreen } from "../../auth/screens/ProfileScreen";
 import { ThemeContext } from "../../../app/providers/ThemeProvider";
 
-export type PassengerStackParamList = {
-  PassengerTabs: undefined;
-  PassengerHome: undefined;
+export type PassengerTabParamList = {
+  PassengerHome: {
+    selectedPlace?: PlaceSuggestion;
+    selectedField?: "pickup" | "dropoff";
+  } | undefined;
   MyBookings: undefined;
   Profile: undefined;
+};
+
+export type PassengerStackParamList = {
+  PassengerTabs: NavigatorScreenParams<PassengerTabParamList>;
   RideDetails: { ride: Ride };
   LiveRide: {
     rideId: string;
@@ -23,11 +39,32 @@ export type PassengerStackParamList = {
     dropoffLat: number;
     dropoffLng: number;
     encodedPolyline: string | null;
+    driverPhone?: string | null;
+    meetupPoint?: {
+      id: string;
+      label: string;
+      lat: number;
+      lng: number;
+      address?: string | null;
+      order?: number;
+      source?: string;
+    } | null;
+  };
+  PassengerLocationSearch: {
+    field: "pickup" | "dropoff";
+    title?: string;
+    focusLat?: number;
+    focusLng?: number;
+    initialQuery?: string;
+  };
+  PassengerMapPicker: {
+    field: "pickup" | "dropoff";
+    initialLocation?: { lat: number; lng: number };
   };
 };
 
 const Stack = createNativeStackNavigator<PassengerStackParamList>();
-const Tab = createBottomTabNavigator();
+const Tab = createBottomTabNavigator<PassengerTabParamList>();
 
 function PassengerTabNavigator() {
   const { theme } = useContext(ThemeContext);
@@ -98,6 +135,16 @@ export function PassengerNavigator() {
       <Stack.Screen
         name="RideDetails"
         component={RideDetailsScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PassengerLocationSearch"
+        component={PassengerLocationSearchScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PassengerMapPicker"
+        component={PassengerMapPickerScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen

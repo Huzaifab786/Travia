@@ -2,9 +2,7 @@ import React, { useState } from "react";
 import {
   View,
   Text,
-  TextInput,
   Pressable,
-  ActivityIndicator,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -19,6 +17,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../../config/supabaseClient";
 import { useTheme } from "../../../app/providers/ThemeProvider";
 import { radius, spacing, typography } from "../../../config/theme";
+import type { UserGender } from "../types/auth";
+import { Input } from "../../../components/ui/Input";
+import { Button } from "../../../components/ui/Button";
 
 type RegisterRouteProp = RouteProp<AuthStackParamList, "Register">;
 
@@ -32,6 +33,7 @@ export function RegisterScreen() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [gender, setGender] = useState<UserGender | "">("");
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -42,14 +44,13 @@ export function RegisterScreen() {
     setMessage("");
     setLoading(true);
 
-    if (!name || !email || !password || !phone) {
+    if (!name || !email || !password || !phone || !gender) {
       setError("All fields are required");
       setLoading(false);
       return;
     }
 
     try {
-      // 1. Sign up with Supabase
       const { data, error: sbError } = await supabase.auth.signUp({
         email,
         password,
@@ -57,6 +58,7 @@ export function RegisterScreen() {
           data: {
             full_name: name,
             phone: phone,
+            gender,
           },
         },
       });
@@ -64,13 +66,13 @@ export function RegisterScreen() {
       if (sbError) throw sbError;
 
       if (data.user) {
-        // 2. Sync with our backend
         await syncUserApi({
           supabaseId: data.user.id,
           email: data.user.email!,
           name,
           phone,
           role,
+          gender,
         });
 
         if (data.session) {
@@ -101,89 +103,109 @@ export function RegisterScreen() {
         style={s.container}
       >
         <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
-          <Pressable onPress={() => navigation.goBack()} style={s.backButton}>
-            <Ionicons name="arrow-back" size={24} color={theme.textPrimary} />
-          </Pressable>
+          <View>
+            <Pressable onPress={() => navigation.goBack()} style={s.backButton}>
+              <Ionicons name="arrow-back" size={24} color={theme.textPrimary} />
+            </Pressable>
 
-          <View style={s.header}>
-            <Text style={s.title}>Create Account</Text>
-            <Text style={s.subtitle}>Join as a <Text style={s.roleText}>{role}</Text></Text>
-          </View>
+            <View style={s.header}>
+              <Text style={s.title}>Create Account</Text>
+              <Text style={s.subtitle}>Join as a <Text style={s.roleText}>{role}</Text></Text>
+            </View>
 
-          <View style={s.form}>
-            <View style={s.inputContainer}>
-              <Ionicons name="person-outline" size={20} color={theme.textMuted} style={s.inputIcon} />
-              <TextInput
+            <View style={s.form}>
+              <Input
                 placeholder="Full Name"
                 value={name}
                 onChangeText={setName}
-                style={s.input}
-                placeholderTextColor={theme.textMuted}
+                leftIcon={<Ionicons name="person-outline" size={20} color={theme.textMuted} />}
+                containerStyle={{ marginBottom: 4 }}
               />
-            </View>
 
-            <View style={s.inputContainer}>
-              <Ionicons name="mail-outline" size={20} color={theme.textMuted} style={s.inputIcon} />
-              <TextInput
+              <Input
                 placeholder="Email address"
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
                 keyboardType="email-address"
-                style={s.input}
-                placeholderTextColor={theme.textMuted}
+                leftIcon={<Ionicons name="mail-outline" size={20} color={theme.textMuted} />}
+                containerStyle={{ marginBottom: 4 }}
               />
-            </View>
 
-            <View style={s.inputContainer}>
-              <Ionicons name="call-outline" size={20} color={theme.textMuted} style={s.inputIcon} />
-              <TextInput
+              <Input
                 placeholder="Phone Number"
                 value={phone}
                 onChangeText={setPhone}
                 keyboardType="phone-pad"
-                style={s.input}
-                placeholderTextColor={theme.textMuted}
+                leftIcon={<Ionicons name="call-outline" size={20} color={theme.textMuted} />}
+                containerStyle={{ marginBottom: 4 }}
               />
-            </View>
 
-            <View style={s.inputContainer}>
-              <Ionicons name="lock-closed-outline" size={20} color={theme.textMuted} style={s.inputIcon} />
-              <TextInput
+              <View style={s.genderGroup}>
+                <Text style={s.genderLabel}>Gender</Text>
+                <View style={s.genderRow}>
+                  {[
+                    { key: "male", label: "Male" },
+                    { key: "female", label: "Female" },
+                    { key: "other", label: "Other" },
+                  ].map((item) => {
+                    const active = gender === item.key;
+                    return (
+                      <Pressable
+                        key={item.key}
+                        onPress={() => setGender(item.key as UserGender)}
+                        style={[
+                          s.genderChip,
+                          active && s.genderChipActive,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            s.genderChipText,
+                            active && s.genderChipTextActive,
+                          ]}
+                        >
+                          {item.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <Input
                 placeholder="Password"
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
-                style={s.input}
-                placeholderTextColor={theme.textMuted}
+                leftIcon={<Ionicons name="lock-closed-outline" size={20} color={theme.textMuted} />}
+                containerStyle={{ marginBottom: 4 }}
+              />
+
+              {message ? (
+                <View style={s.messageBox}>
+                  <Ionicons name="mail-unread-outline" size={16} color={theme.primary} />
+                  <Text style={s.messageText}>{message}</Text>
+                </View>
+              ) : null}
+
+              {error ? (
+                <View style={s.errorBox}>
+                  <Ionicons name="alert-circle" size={16} color={theme.danger} />
+                  <Text style={s.errorText}>{error}</Text>
+                </View>
+              ) : null}
+
+              <Button
+                title="Sign Up"
+                onPress={onRegister}
+                loading={loading}
+                variant="solid"
+                size="lg"
+                fullWidth
+                style={s.registerButton}
               />
             </View>
-
-            {message ? (
-              <View style={s.messageBox}>
-                <Ionicons name="mail-unread-outline" size={16} color={theme.primary} />
-                <Text style={s.messageText}>{message}</Text>
-              </View>
-            ) : null}
-
-            {error ? (
-              <View style={s.errorBox}>
-                <Ionicons name="alert-circle" size={16} color={theme.danger} />
-                <Text style={s.errorText}>{error}</Text>
-              </View>
-            ) : null}
-
-            <Pressable
-              onPress={onRegister}
-              disabled={loading}
-              style={[s.primaryButton, loading && s.buttonDisabled]}
-            >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={s.primaryButtonText}>Sign Up</Text>
-              )}
-            </Pressable>
           </View>
 
           <View style={s.footer}>
@@ -204,35 +226,53 @@ function makeStyles(theme: any) {
   return StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: theme.background },
     container: { flex: 1 },
-    scrollContent: { paddingHorizontal: spacing.xl, paddingBottom: 20 },
+    scrollContent: { flexGrow: 1, paddingHorizontal: spacing.xl, paddingBottom: 30, justifyContent: "space-between" },
     backButton: { width: 40, height: 40, justifyContent: "center", alignItems: "flex-start", marginTop: 10 },
-    header: { marginTop: 20, marginBottom: 40 },
-    title: { ...typography.h1, color: theme.textPrimary },
+    header: { marginTop: 20, marginBottom: spacing["3xl"] },
+    title: { ...typography.hero, fontSize: 32, color: theme.textPrimary },
     subtitle: { ...typography.body, color: theme.textSecondary, marginTop: 8 },
     roleText: { color: theme.primary, fontWeight: "700", textTransform: "capitalize" },
-    form: { gap: 16 },
-    inputContainer: {
-      flexDirection: "row", alignItems: "center", backgroundColor: theme.surface,
-      borderWidth: 1, borderColor: theme.border, borderRadius: radius.lg, paddingHorizontal: 16, height: 56
+    form: { gap: 12 },
+    genderGroup: { gap: 10, marginTop: 4, marginBottom: 8 },
+    genderLabel: {
+      ...typography.captionMedium,
+      color: theme.textSecondary,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginLeft: spacing.xs,
     },
-    inputIcon: { marginRight: 12 },
-    input: { flex: 1, fontSize: 16, color: theme.textPrimary },
-    errorBox: { flexDirection: "row", alignItems: "center", backgroundColor: theme.dangerBg, padding: 12, borderRadius: 12, gap: 8 },
+    genderRow: { flexDirection: "row", gap: 10 },
+    genderChip: {
+      flex: 1,
+      minHeight: 56,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    genderChipActive: {
+      backgroundColor: theme.primarySubtle,
+      borderColor: theme.primary,
+      borderWidth: 2,
+    },
+    genderChipText: {
+      color: theme.textSecondary,
+      fontWeight: "600",
+    },
+    genderChipTextActive: {
+      color: theme.primaryLight,
+    },
+    errorBox: { flexDirection: "row", alignItems: "center", backgroundColor: theme.dangerBg, padding: 12, borderRadius: 12, gap: 8, marginBottom: 12 },
     errorText: { color: theme.danger, fontSize: 14, flex: 1 },
-    messageBox: { flexDirection: "row", alignItems: "center", backgroundColor: theme.primarySubtle, padding: 12, borderRadius: 12, gap: 8 },
+    messageBox: { flexDirection: "row", alignItems: "center", backgroundColor: theme.primarySubtle, padding: 12, borderRadius: 12, gap: 8, marginBottom: 12 },
     messageText: { color: theme.primary, fontSize: 14, flex: 1, fontWeight: "600" },
-    primaryButton: {
-      backgroundColor: theme.primary, height: 56, borderRadius: radius.lg,
-      justifyContent: "center", alignItems: "center", marginTop: 8,
-      shadowColor: theme.shadowColor, shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.2, shadowRadius: 8, elevation: 4
-    },
-    buttonDisabled: { opacity: 0.7 },
-    primaryButtonText: { color: "white", fontSize: 18, fontWeight: "700" },
-    footer: { alignItems: "center", gap: 16, marginVertical: 20 },
+    registerButton: { marginTop: 8 },
+    footer: { alignItems: "center", gap: 16, marginTop: spacing["4xl"], marginBottom: 20 },
     footerLink: { padding: 4 },
     footerText: { fontSize: 15, color: theme.textSecondary },
     footerTextBold: { color: theme.primary, fontWeight: "700" },
     footerTextMuted: { fontSize: 14, color: theme.textMuted }
   });
-}
+}

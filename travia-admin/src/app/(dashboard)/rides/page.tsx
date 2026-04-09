@@ -26,6 +26,10 @@ function getStatusClasses(status: AdminRideStatus) {
   switch (status) {
     case "active":
       return "border-emerald-200 bg-emerald-100 text-emerald-700";
+    case "ready":
+      return "border-amber-200 bg-amber-100 text-amber-700";
+    case "in_progress":
+      return "border-rose-200 bg-rose-100 text-rose-700";
     case "completed":
       return "border-sky-200 bg-sky-100 text-sky-700";
     case "cancelled":
@@ -45,6 +49,7 @@ export default function RidesPage() {
   );
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     async function loadRides() {
@@ -72,10 +77,28 @@ export default function RidesPage() {
     () => rides.filter((ride) => ride.status === "active").length,
     [rides],
   );
+
+  const filteredRides = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    if (!query) return rides;
+
+    return rides.filter((ride) => {
+      return (
+        ride.driver?.name?.toLowerCase().includes(query) ||
+        ride.driver?.email?.toLowerCase().includes(query) ||
+        ride.pickupAddress.toLowerCase().includes(query) ||
+        ride.dropoffAddress.toLowerCase().includes(query) ||
+        ride.id.toLowerCase().includes(query)
+      );
+    });
+  }, [rides, search]);
+
   function closeRideDetail() {
     setSelectedRide(null);
     setDetailError(null);
   }
+
   async function handleOpenRideDetail(rideId: string) {
     setDetailLoading(true);
     setDetailError(null);
@@ -94,7 +117,6 @@ export default function RidesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Hero */}
       <section className="overflow-hidden rounded-4xl border border-white/70 bg-white/80 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.10)] backdrop-blur sm:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-4">
@@ -125,7 +147,6 @@ export default function RidesPage() {
         </div>
       </section>
 
-      {/* Filter + list */}
       <section className="rounded-4xl border border-slate-200/80 bg-white/90 p-5 shadow-sm">
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -133,30 +154,53 @@ export default function RidesPage() {
               Platform Rides
             </h2>
             <p className="text-sm text-slate-500">
-              {totalRides} ride{totalRides === 1 ? "" : "s"} shown
+              {filteredRides.length} ride{filteredRides.length === 1 ? "" : "s"}{" "}
+              shown
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {FILTERS.map((item) => {
-              const isActive = filter === item.value;
+          <div className="flex flex-col gap-3 lg:items-end">
+            <input
+              type="text"
+              placeholder="Search by driver, email, route, or ride ID..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200 lg:w-96"
+            />
 
-              return (
-                <button
-                  key={item.value}
-                  onClick={() => setFilter(item.value)}
-                  className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                    isActive
-                      ? "bg-slate-900 text-white shadow-sm"
-                      : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
+            <div className="flex flex-wrap gap-2">
+              {FILTERS.map((item) => {
+                const isActive = filter === item.value;
+
+                return (
+                  <button
+                    key={item.value}
+                    onClick={() => setFilter(item.value)}
+                    className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                      isActive
+                        ? "bg-slate-900 text-white shadow-sm"
+                        : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
+
+        {detailLoading && (
+          <div className="mb-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
+            Loading ride details...
+          </div>
+        )}
+
+        {detailError && (
+          <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {detailError}
+          </div>
+        )}
 
         {status === "loading" && (
           <div className="grid gap-4 md:grid-cols-2">
@@ -173,33 +217,23 @@ export default function RidesPage() {
           </div>
         )}
 
-        {status === "ready" && rides.length === 0 && (
+        {status === "ready" && filteredRides.length === 0 && (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-6 py-12 text-center">
             <p className="text-lg font-medium text-slate-700">No rides found</p>
             <p className="mt-2 text-sm text-slate-500">
-              There are no rides available for the selected filter.
+              No rides match the selected filter or your search query.
             </p>
           </div>
         )}
-        {status === "ready" && rides.length > 0 && (
+
+        {status === "ready" && filteredRides.length > 0 && (
           <div className="grid gap-4 xl:grid-cols-2">
-            {rides.map((ride) => (
+            {filteredRides.map((ride) => (
               <div
                 key={ride.id}
                 onClick={() => handleOpenRideDetail(ride.id)}
                 className="cursor-pointer rounded-3xl border border-slate-200 bg-slate-50/70 p-5 transition hover:border-slate-300 hover:bg-slate-50"
               >
-                {detailLoading && (
-                  <div className="mb-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-                    Loading ride details...
-                  </div>
-                )}
-
-                {detailError && (
-                  <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                    {detailError}
-                  </div>
-                )}
                 <div className="flex flex-col gap-5">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="space-y-2">
@@ -273,10 +307,10 @@ export default function RidesPage() {
           </div>
         )}
       </section>
+
       {selectedRide && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
           <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-4xl border border-slate-200 bg-white shadow-2xl">
-            {/* Header */}
             <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
@@ -299,7 +333,6 @@ export default function RidesPage() {
               </button>
             </div>
 
-            {/* Body */}
             <div className="space-y-6 px-6 py-6">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
@@ -454,7 +487,7 @@ export default function RidesPage() {
                       </p>
 
                       {selectedRide.driver.vehicle ? (
-                        <div className="mt-3 space-y-2 text-sm text-slate-700">
+                        <div className="mt-3 space-y-3 text-sm text-slate-700">
                           <p>
                             <span className="font-medium text-slate-900">
                               Model:
@@ -475,6 +508,21 @@ export default function RidesPage() {
                               ? `${selectedRide.driver.vehicle.engineCC} cc`
                               : "N/A"}
                           </p>
+                          <p>
+                            <span className="font-medium text-slate-900">
+                              Plate:
+                            </span>{" "}
+                            {selectedRide.driver.vehicle.vehicleNumber || "N/A"}
+                          </p>
+                          {selectedRide.driver.vehicle.carImageUrl ? (
+                            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                              <img
+                                src={selectedRide.driver.vehicle.carImageUrl}
+                                alt="Vehicle"
+                                className="h-40 w-full object-cover"
+                              />
+                            </div>
+                          ) : null}
                         </div>
                       ) : (
                         <p className="mt-3 text-sm text-slate-500">
@@ -559,6 +607,15 @@ export default function RidesPage() {
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-5 sm:flex-row sm:justify-end">
+              <button
+                onClick={closeRideDetail}
+                className="rounded-2xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

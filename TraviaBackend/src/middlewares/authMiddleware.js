@@ -15,6 +15,11 @@ const protect = async (req, res, next) => {
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
+      select: {
+        id: true,
+        role: true,
+        gender: true,
+      },
     });
 
     if (!user) {
@@ -24,11 +29,46 @@ const protect = async (req, res, next) => {
     req.user = {
       id: user.id,
       role: user.role,
+      gender: user.gender,
     };
 
     next();
   } catch (err) {
     return res.status(401).json({ message: "Not authorized, token failed" });
+  }
+};
+
+const optionalProtect = async (req, _res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return next();
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: {
+        id: true,
+        role: true,
+        gender: true,
+      },
+    });
+
+    if (user) {
+      req.user = {
+        id: user.id,
+        role: user.role,
+        gender: user.gender,
+      };
+    }
+
+    return next();
+  } catch (err) {
+    return next();
   }
 };
 
@@ -40,4 +80,4 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-module.exports = { protect, requireAdmin };
+module.exports = { protect, optionalProtect, requireAdmin };

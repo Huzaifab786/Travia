@@ -15,14 +15,20 @@ router.get("/drivers", ctrl.getAllDrivers);
 router.get("/drivers/pending", ctrl.getPendingDrivers);
 router.get("/drivers/:id", ctrl.getDriverDetail);
 router.post("/drivers/:id/approve", ctrl.approveDriver);
+router.post("/drivers/:id/suspend", ctrl.suspendDriver);
 router.post("/drivers/:id/reject", ctrl.rejectDriver);
 
 // Ride management
 router.get("/rides", ctrl.getAllRides);
 
+// Pricing management
+router.get("/pricing", ctrl.getPricingSettings);
+router.put("/pricing", ctrl.updatePricingSettings);
+
 // User management
 router.get("/users", ctrl.getAllUsers);
 //Ride details management
 router.get("/rides/:id", ctrl.getRideDetail);
+
 
 module.exports = router;

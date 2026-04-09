@@ -5,9 +5,11 @@ export type Vehicle = {
   userId: string;
   carModel: string;
   carType: string | null;
+  vehicleNumber: string | null;
   engineCC: number | null;
   avgKmPerLitre: number;
-  fuelPricePerLitre: number;
+  carImageUrl: string | null;
+  carImagePath: string | null;
 };
 
 export const getMyVehicleApi = () => {
@@ -17,9 +19,11 @@ export const getMyVehicleApi = () => {
 export const updateVehicleApi = (payload: {
   carModel: string;
   carType?: string;
+  vehicleNumber: string;
   engineCC?: number;
   avgKmPerLitre: number;
-  fuelPricePerLitre: number;
+  carImageUrl?: string | null;
+  carImagePath?: string | null;
 }) => {
   return apiClient<{ vehicle: Vehicle }>("/api/vehicle", {
     method: "POST",

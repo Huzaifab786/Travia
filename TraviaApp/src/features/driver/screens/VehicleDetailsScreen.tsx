@@ -8,13 +8,20 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { getMyVehicleApi, updateVehicleApi, Vehicle } from "../api/vehicleApi";
+import * as ImagePicker from "expo-image-picker";
+import { getMyVehicleApi, updateVehicleApi } from "../api/vehicleApi";
+import {
+  getPricingSettingsApi,
+  PricingSettings,
+} from "../../pricing/api/pricingApi";
 import { useTheme } from "../../../app/providers/ThemeProvider";
 import { radius, spacing, typography } from "../../../config/theme";
+import { supabase } from "../../../config/supabaseClient";
 
 export function VehicleDetailsScreen() {
   const { theme } = useTheme();
@@ -24,9 +31,13 @@ export function VehicleDetailsScreen() {
 
   const [carModel, setCarModel] = useState("");
   const [carType, setCarType] = useState("");
+  const [vehicleNumber, setVehicleNumber] = useState("");
   const [engineCC, setEngineCC] = useState("");
   const [avgKmPerLitre, setAvgKmPerLitre] = useState("12");
-  const [fuelPricePerLitre, setFuelPricePerLitre] = useState("270");
+  const [pricing, setPricing] = useState<PricingSettings | null>(null);
+  const [carImageUri, setCarImageUri] = useState<string | null>(null);
+  const [carImageUrl, setCarImageUrl] = useState<string | null>(null);
+  const [carImagePath, setCarImagePath] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchVehicle = async () => {
@@ -35,9 +46,18 @@ export function VehicleDetailsScreen() {
         if (res.vehicle) {
           setCarModel(res.vehicle.carModel);
           setCarType(res.vehicle.carType || "");
+          setVehicleNumber(res.vehicle.vehicleNumber || "");
           setEngineCC(res.vehicle.engineCC?.toString() || "");
           setAvgKmPerLitre(res.vehicle.avgKmPerLitre.toString());
-          setFuelPricePerLitre(res.vehicle.fuelPricePerLitre.toString());
+          setCarImageUrl(res.vehicle.carImageUrl || null);
+          setCarImagePath(res.vehicle.carImagePath || null);
+        }
+
+        try {
+          const pricingRes = await getPricingSettingsApi();
+          setPricing(pricingRes.pricingSettings);
+        } catch {
+          setPricing(null);
         }
       } catch (e: any) {
         Alert.alert("Error", "Failed to load vehicle details");
@@ -45,23 +65,84 @@ export function VehicleDetailsScreen() {
         setLoading(false);
       }
     };
+
     fetchVehicle();
   }, []);
 
+  const pickCarImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission Required", "We need gallery access to upload a car photo.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      setCarImageUri(result.assets[0].uri);
+    }
+  };
+
+  const uploadCarImage = async (uri: string) => {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const arrayBuffer = await new Response(blob).arrayBuffer();
+    const fileName = `${Date.now()}-vehicle.jpg`;
+    const filePath = `vehicles/${fileName}`;
+
+    const { error } = await supabase.storage.from("documents").upload(
+      filePath,
+      arrayBuffer,
+      {
+        contentType: "image/jpeg",
+        upsert: false,
+      },
+    );
+
+    if (error) throw error;
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from("documents").getPublicUrl(filePath);
+
+    return {
+      url: publicUrl,
+      path: filePath,
+    };
+  };
+
   const onSave = async () => {
-    if (!carModel || !avgKmPerLitre || !fuelPricePerLitre) {
-      Alert.alert("Required", "Please fill in Model, Fuel Average, and Fuel Price.");
+    if (!carModel || !vehicleNumber || !avgKmPerLitre) {
+      Alert.alert(
+        "Required",
+        "Please fill in Model, Vehicle Number, and Fuel Average.",
+      );
       return;
     }
 
     setSaving(true);
     try {
+      let uploadedImageUrl = carImageUrl;
+      let uploadedImagePath = carImagePath;
+
+      if (carImageUri) {
+        const upload = await uploadCarImage(carImageUri);
+        uploadedImageUrl = upload.url;
+        uploadedImagePath = upload.path;
+      }
+
       await updateVehicleApi({
         carModel,
         carType,
+        vehicleNumber,
         engineCC: engineCC ? Number(engineCC) : undefined,
         avgKmPerLitre: Number(avgKmPerLitre),
-        fuelPricePerLitre: Number(fuelPricePerLitre),
+        carImageUrl: uploadedImageUrl,
+        carImagePath: uploadedImagePath,
       });
       Alert.alert("Success", "Vehicle details saved successfully!");
       navigation.goBack();
@@ -82,6 +163,8 @@ export function VehicleDetailsScreen() {
     );
   }
 
+  const imagePreview = carImageUri || carImageUrl;
+
   return (
     <SafeAreaView style={s.container}>
       <View style={s.header}>
@@ -95,9 +178,25 @@ export function VehicleDetailsScreen() {
         <View style={s.infoCard}>
           <Ionicons name="information-circle" size={20} color={theme.primary} />
           <Text style={s.infoText}>
-            These details are used to calculate accurate per-seat costs based on fuel consumption.
+            Add your Pakistan vehicle number plate and a clear car photo so passengers and admin can identify your car easily.
           </Text>
         </View>
+
+        <Pressable onPress={pickCarImage} style={s.imageCard}>
+          {imagePreview ? (
+            <Image source={{ uri: imagePreview }} style={s.imagePreview} />
+          ) : (
+            <View style={s.imagePlaceholder}>
+              <Ionicons name="camera-outline" size={28} color={theme.textMuted} />
+              <Text style={s.imagePlaceholderText}>Tap to upload car photo</Text>
+            </View>
+          )}
+          <View style={s.imageOverlay}>
+            <Text style={s.imageOverlayText}>
+              {imagePreview ? "Change car photo" : "Upload car photo"}
+            </Text>
+          </View>
+        </Pressable>
 
         <View style={s.section}>
           <Text style={s.label}>Car Model</Text>
@@ -105,6 +204,17 @@ export function VehicleDetailsScreen() {
             value={carModel}
             onChangeText={setCarModel}
             placeholder="e.g. Honda Civic 2022"
+            placeholderTextColor={theme.textMuted}
+            style={s.input}
+          />
+        </View>
+
+        <View style={s.section}>
+          <Text style={s.label}>Vehicle Number / Plate</Text>
+          <TextInput
+            value={vehicleNumber}
+            onChangeText={setVehicleNumber}
+            placeholder="e.g. LEA-1234 or BKC-123"
             placeholderTextColor={theme.textMuted}
             style={s.input}
           />
@@ -133,35 +243,29 @@ export function VehicleDetailsScreen() {
           />
         </View>
 
-        <View style={s.row}>
-          <View style={[s.section, { flex: 1 }]}>
-            <Text style={s.label}>Avg KM/Litre</Text>
-            <TextInput
-              value={avgKmPerLitre}
-              onChangeText={setAvgKmPerLitre}
-              placeholder="e.g. 12"
-              placeholderTextColor={theme.textMuted}
-              keyboardType="numeric"
-              style={s.input}
-            />
-          </View>
-          <View style={[s.section, { flex: 1 }]}>
-            <Text style={s.label}>Fuel Price (Rs/L)</Text>
-            <TextInput
-              value={fuelPricePerLitre}
-              onChangeText={setFuelPricePerLitre}
-              placeholder="e.g. 270"
-              placeholderTextColor={theme.textMuted}
-              keyboardType="numeric"
-              style={s.input}
-            />
-          </View>
+        <View style={s.section}>
+          <Text style={s.label}>Avg KM/Litre</Text>
+          <TextInput
+            value={avgKmPerLitre}
+            onChangeText={setAvgKmPerLitre}
+            placeholder="e.g. 12"
+            placeholderTextColor={theme.textMuted}
+            keyboardType="numeric"
+            style={s.input}
+          />
         </View>
 
         <View style={s.formulaCard}>
-          <Text style={s.formulaTitle}>Cost Formula:</Text>
+          <Text style={s.formulaTitle}>Cost Formula</Text>
           <Text style={s.formulaText}>
-            (Distance / Average) × Fuel Price ÷ (Seats + 1)
+            Shared per-seat fare = (Distance km / Avg km/litre) x Admin fuel price / total riders
+          </Text>
+          <Text style={s.formulaNote}>
+            Fuel price is managed by the admin and applies to every new ride.
+            No service fee is added right now, so passengers only pay the shared ride cost.
+          </Text>
+          <Text style={s.formulaNote}>
+            Current admin fuel price: {pricing ? `Rs ${pricing.fuelPricePerLitre}/L` : "Loading..."}
           </Text>
         </View>
 
@@ -170,7 +274,11 @@ export function VehicleDetailsScreen() {
           disabled={saving}
           style={[s.saveBtn, saving && s.disabledBtn]}
         >
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={s.saveBtnText}>Save Details</Text>}
+          {saving ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={s.saveBtnText}>Save Details</Text>
+          )}
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -199,11 +307,38 @@ function makeStyles(theme: any) {
       padding: spacing.md,
       borderRadius: radius.md,
       gap: 10,
-      marginBottom: spacing.xl,
+      marginBottom: spacing.lg,
       borderWidth: 1,
       borderColor: theme.successBg,
     },
     infoText: { flex: 1, ...typography.captionMedium, color: theme.success, lineHeight: 18 },
+    imageCard: {
+      height: 190,
+      borderRadius: radius.lg,
+      overflow: "hidden",
+      backgroundColor: theme.surfaceElevated,
+      borderWidth: 1,
+      borderColor: theme.border,
+      marginBottom: spacing.xl,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    imagePreview: { width: "100%", height: "100%" },
+    imagePlaceholder: {
+      alignItems: "center",
+      gap: 8,
+    },
+    imagePlaceholderText: { ...typography.bodyMedium, color: theme.textMuted },
+    imageOverlay: {
+      position: "absolute",
+      bottom: 12,
+      right: 12,
+      backgroundColor: "rgba(15,23,42,0.75)",
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: radius.full,
+    },
+    imageOverlayText: { ...typography.captionMedium, color: "#fff" },
     section: { marginBottom: spacing.lg },
     label: { ...typography.bodyMedium, color: theme.textPrimary, marginBottom: spacing.sm },
     input: {
@@ -216,7 +351,6 @@ function makeStyles(theme: any) {
       ...typography.body,
       color: theme.textPrimary,
     },
-    row: { flexDirection: "row", gap: spacing.md },
     formulaCard: {
       backgroundColor: theme.background,
       padding: spacing.md,
@@ -227,7 +361,13 @@ function makeStyles(theme: any) {
       borderColor: theme.border,
     },
     formulaTitle: { ...typography.label, color: theme.textSecondary, marginBottom: 4 },
-    formulaText: { ...typography.bodyMedium, color: theme.textPrimary, fontStyle: "italic" },
+    formulaText: { ...typography.bodyMedium, color: theme.textPrimary, lineHeight: 22 },
+    formulaNote: {
+      ...typography.caption,
+      color: theme.textMuted,
+      marginTop: 6,
+      lineHeight: 18,
+    },
     saveBtn: {
       backgroundColor: theme.primary,
       borderRadius: radius.lg,

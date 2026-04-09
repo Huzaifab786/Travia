@@ -40,6 +40,10 @@ function getStatusBadge(status: string | null) {
     return "bg-rose-100 text-rose-700 border border-rose-200";
   }
 
+  if (status === "suspended") {
+    return "bg-slate-200 text-slate-700 border border-slate-300";
+  }
+
   return "bg-slate-100 text-slate-500 border border-slate-200";
 }
 
