@@ -11,6 +11,7 @@ const {
   cancelRide,
   updateRideLocation,
   getRideLocation,
+  startRideController,
   completeRideController,
   deleteRideController,
 } = require("../controllers/rideController");
@@ -26,6 +27,7 @@ router.get("/me", protect, requireRole("driver"), listMyRides);
 router.get("/:id", optionalProtect, getRideById);
 
 router.patch("/:id/cancel", protect, requireRole("driver"), cancelRide);
+router.patch("/:id/start", protect, requireRole("driver"), startRideController);
 router.patch("/:id/complete", protect, requireRole("driver"), completeRideController);
 router.delete("/:id", protect, requireRole("driver"), deleteRideController);
 

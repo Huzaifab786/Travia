@@ -19,6 +19,13 @@ export type PassengerBooking = {
   status: "pending" | "accepted" | "rejected" | "cancelled";
   createdAt: string;
   hasReviewed?: boolean;
+  review?: {
+    rideId: string;
+    revieweeId: string;
+    rating: number;
+    comment?: string | null;
+    createdAt: string;
+  } | null;
   ride: {
     id: string;
     pickup: {

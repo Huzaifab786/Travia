@@ -1,13 +1,23 @@
 const prisma = require("../config/db");
 const {
+  getCachedRideList,
+  setCachedRideList,
+  invalidateRideListCache,
+} = require("../cache/rideListCache");
+const {
   getRouteBetweenPoints,
   getRouteAlternativesBetweenPoints,
-  minDistanceToPolylineMeters,
 } = require("./routeService");
 const {
   getPricingSettings,
   calculateSharedFare,
 } = require("./pricingService");
+const {
+  normalizeTripPlace,
+  buildRouteSignatureFromPlaces,
+  buildRouteLabelSignatureFromPlaces,
+  isPassCurrentlyActive,
+} = require("./passService");
 
 function buildFareBreakdown({
   distanceMeters,
@@ -194,6 +204,7 @@ const createRide = async (driverId, payload) => {
     },
   });
 
+  invalidateRideListCache();
   return {
     ...ride,
     fareBreakdown: pricing,
@@ -211,6 +222,22 @@ const listActiveRides = async ({
   tripType = null,
   userGender = null,
 } = {}) => {
+  const cacheParams = {
+    search: String(search || "").trim().toLowerCase(),
+    pickupLat: pickupLat != null ? Number(pickupLat) : null,
+    pickupLng: pickupLng != null ? Number(pickupLng) : null,
+    routeRadiusKm: routeRadiusKm != null ? Number(routeRadiusKm) : null,
+    dropoffLat: dropoffLat != null ? Number(dropoffLat) : null,
+    dropoffLng: dropoffLng != null ? Number(dropoffLng) : null,
+    tripType,
+    userGender,
+  };
+
+  const cachedRides = getCachedRideList(cacheParams);
+  if (cachedRides) {
+    return cachedRides;
+  }
+
   const pricingSettings = await getPricingSettings();
   const effectiveRouteRadiusKm =
     routeRadiusKm != null && Number.isFinite(Number(routeRadiusKm))
@@ -221,7 +248,7 @@ const rides = await prisma.ride.findMany({
   where: {
     status: { in: ["active", "ready"] },
     departureTime: {
-      gte: new Date(),
+      gte: new Date(Date.now() - 1000 * 60 * 60), // Allow 1 hour grace period
     },
     ...(userGender === "female" ? {} : { femaleOnly: false }),
   },
@@ -441,6 +468,7 @@ const rides = await prisma.ride.findMany({
     );
   });
 
+  setCachedRideList(cacheParams, filteredRides);
   return filteredRides;
 };
 
@@ -463,6 +491,8 @@ const listDriverRides = async (driverId) => {
       passengerId: true,
       seatsRequested: true,
       meetupPoint: true,
+      passengerPickup: true,
+      passengerDropoff: true,
       passenger: {
         select: {
           id: true,
@@ -583,6 +613,7 @@ const cancelRide = async (driverId, rideId) => {
     return r;
   });
 
+  invalidateRideListCache();
   // reshape pickup/dropoff for response
   return {
     ...updatedRide,
@@ -599,36 +630,8 @@ const cancelRide = async (driverId, rideId) => {
   };
 };
 
-// ─── Real-time Tracking ───────────────────────────────────────────────────────
-
-const ROUTE_DEVIATION_THRESHOLD_METERS = 200;
-
-function getRouteDeviationInfo(lat, lng, encodedPolyline) {
-  let isDeviated = false;
-  let distanceFromRoute = null;
-  let routeStatus = "on_route";
-
-  if (!encodedPolyline) {
-    return { isDeviated, distanceFromRoute, routeStatus };
-  }
-
-  try {
-    const polyline = JSON.parse(encodedPolyline);
-    if (Array.isArray(polyline) && polyline.length >= 2) {
-      distanceFromRoute = minDistanceToPolylineMeters(lat, lng, polyline);
-      isDeviated = distanceFromRoute > ROUTE_DEVIATION_THRESHOLD_METERS;
-      routeStatus = isDeviated ? "deviated" : "on_route";
-    }
-  } catch (_) {
-    // skip deviation check if polyline is invalid
-  }
-
-  return { isDeviated, distanceFromRoute, routeStatus };
-}
-
 /**
  * Driver calls this every ~15 seconds to broadcast their position.
- * Returns deviation info so passenger can be alerted.
  */
 const updateDriverLocation = async (driverId, rideId, lat, lng) => {
   const ride = await prisma.ride.findUnique({ where: { id: rideId } });
@@ -661,9 +664,8 @@ const updateDriverLocation = async (driverId, rideId, lat, lng) => {
     },
   });
 
-  const deviation = getRouteDeviationInfo(lat, lng, ride.encodedPolyline);
-
-  return { lat, lng, ...deviation };
+  invalidateRideListCache();
+  return { lat, lng };
 };
 
 /**
@@ -677,36 +679,58 @@ const getDriverLocation = async (rideId) => {
       currentLng: true,
       lastUpdate: true,
       status: true,
-      encodedPolyline: true,
     },
   });
 
   if (!ride)
     throw Object.assign(new Error("Ride not found"), { statusCode: 404 });
 
-  const deviation =
-    ride.currentLat != null && ride.currentLng != null
-      ? getRouteDeviationInfo(
-          ride.currentLat,
-          ride.currentLng,
-          ride.encodedPolyline,
-        )
-      : { isDeviated: false, distanceFromRoute: null, routeStatus: "on_route" };
-
   return {
     lat: ride.currentLat,
     lng: ride.currentLng,
     lastUpdate: ride.lastUpdate,
     status: ride.status,
-    ...deviation,
   };
 };
+
+/**
+ * Mark a ride as in_progress (driver only).
+ */
+async function startRide(driverId, rideId) {
+  const ride = await prisma.ride.findUnique({ where: { id: rideId } });
+
+  if (!ride) {
+    throw Object.assign(new Error("Ride not found"), { statusCode: 404 });
+  }
+
+  if (ride.driverId !== driverId) {
+    throw Object.assign(new Error("Not authorized"), { statusCode: 403 });
+  }
+
+  if (ride.status !== "ready" && ride.status !== "active") {
+    throw Object.assign(
+      new Error("Only a ready or active ride can be started"),
+      { statusCode: 400 },
+    );
+  }
+
+  const updated = await prisma.ride.update({
+    where: { id: rideId },
+    data: { status: "in_progress", lastUpdate: new Date() },
+  });
+
+  invalidateRideListCache();
+  return updated;
+}
 
 /**
  * Mark a ride as completed (driver only).
  */
 async function completeRide(driverId, rideId) {
-  const ride = await prisma.ride.findUnique({ where: { id: rideId } });
+  const ride = await prisma.ride.findUnique({ 
+    where: { id: rideId },
+    include: { bookings: true }
+  });
 
   if (!ride) {
     throw Object.assign(new Error("Ride not found"), { statusCode: 404 });
@@ -723,12 +747,79 @@ async function completeRide(driverId, rideId) {
     );
   }
 
-  const updated = await prisma.ride.update({
-    where: { id: rideId },
-    data: { status: "completed" },
+  await prisma.$transaction(async (tx) => {
+    // Mark ride as completed
+    await tx.ride.update({
+      where: { id: rideId },
+      data: { status: "completed" },
+    });
+
+    // Handle pass deductions and mark bookings as dropped_off
+    for (const booking of ride.bookings) {
+      if (booking.status === "accepted" || booking.status === "picked_up") {
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: { status: "dropped_off" }
+        });
+      }
+
+      const pricingQuote = booking.pricingQuote || {};
+      let pass = null;
+
+      if (pricingQuote.passId) {
+        pass = await tx.commuterPass.findUnique({
+          where: { id: pricingQuote.passId },
+        });
+      }
+
+      if (!pass) {
+        const routePickup = normalizeTripPlace(booking.passengerPickup);
+        const routeDropoff = normalizeTripPlace(booking.passengerDropoff);
+        const routeLabelSignature = buildRouteLabelSignatureFromPlaces(
+          routePickup,
+          routeDropoff,
+        );
+        const routeCoordinateSignature = buildRouteSignatureFromPlaces(
+          routePickup,
+          routeDropoff,
+        );
+
+        pass = await tx.commuterPass.findFirst({
+          where: {
+            passengerId: booking.passengerId,
+            driverId: ride.driverId,
+            status: "active",
+            OR: [
+              routeLabelSignature ? { routeSignature: routeLabelSignature } : null,
+              routeCoordinateSignature
+                ? { routeSignature: routeCoordinateSignature }
+                : null,
+            ].filter(Boolean),
+          },
+        });
+      }
+
+      if (pass && isPassCurrentlyActive(pass)) {
+        const nextRidesUsed = Number(pass.ridesUsed || 0) + 1;
+        const totalRides = Number(pass.totalRides || 0);
+        const nextStatus =
+          totalRides > 0 && nextRidesUsed >= totalRides
+            ? "exhausted"
+            : "active";
+
+        await tx.commuterPass.update({
+          where: { id: pass.id },
+          data: {
+            ridesUsed: nextRidesUsed,
+            status: nextStatus,
+          },
+        });
+      }
+    }
   });
 
-  return updated;
+  invalidateRideListCache();
+  return { id: rideId, status: "completed" };
 }
 
 /**
@@ -755,6 +846,7 @@ async function deleteRide(driverId, rideId) {
     await tx.ride.delete({ where: { id: rideId } });
   });
 
+  invalidateRideListCache();
   return { deleted: true, rideId };
 }
 
@@ -871,6 +963,7 @@ module.exports = {
   cancelRide,
   updateDriverLocation,
   getDriverLocation,
+  startRide,
   completeRide,
   deleteRide,
 };

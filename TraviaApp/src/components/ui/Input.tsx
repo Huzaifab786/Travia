@@ -7,7 +7,6 @@ import {
   TextInputProps,
   ViewStyle,
   TextStyle,
-  Animated,
 } from "react-native";
 import { useTheme } from "../../app/providers/ThemeProvider";
 import { spacing, radius, typography } from "../../config/theme";
@@ -52,65 +51,24 @@ export function Input({
     return theme.surface;
   };
 
-  const styles = StyleSheet.create({
-    container: {
-      marginBottom: spacing.md,
-      width: "100%",
-    },
-    label: {
-      ...typography.captionMedium,
-      color: theme.textSecondary,
-      marginBottom: spacing.xs,
-      marginLeft: spacing.xs,
-      textTransform: "uppercase",
-      letterSpacing: 0.5,
-      fontSize: 12,
-    },
-    inputWrapper: {
-      flexDirection: "row",
-      alignItems: "center",
-      borderWidth: isFocused ? 2 : 1,
-      borderColor: getBorderColor(),
-      borderRadius: radius.lg,
-      backgroundColor: getBackgroundColor(),
-      paddingHorizontal: spacing.md,
-      minHeight: 56, // Premium taller input
-      shadowColor: isFocused ? theme.primary : "transparent",
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: isFocused ? 0.15 : 0,
-      shadowRadius: 12,
-      elevation: isFocused ? 4 : 0,
-    },
-    input: {
-      flex: 1,
-      ...typography.bodyMedium,
-      color: theme.textPrimary,
-      paddingVertical: spacing.sm,
-      marginLeft: leftIcon ? spacing.sm : 0,
-      marginRight: rightIcon ? spacing.sm : 0,
-      fontSize: 16,
-    },
-    errorText: {
-      ...typography.caption,
-      color: theme.danger,
-      marginTop: spacing.xs,
-      marginLeft: spacing.xs,
-    },
-    successText: {
-      ...typography.caption,
-      color: theme.success,
-      marginTop: spacing.xs,
-      marginLeft: spacing.xs,
-    },
-  });
-
   return (
     <View style={[styles.container, containerStyle]}>
-      {label && <Text style={[styles.label, labelStyle]}>{label}</Text>}
-      <View style={styles.inputWrapper}>
+      {label && <Text style={[styles.label, { color: theme.textSecondary }, labelStyle]}>{label}</Text>}
+      <View 
+        style={[
+          styles.inputWrapper, 
+          { 
+            borderColor: getBorderColor(),
+            backgroundColor: getBackgroundColor(),
+            shadowColor: isFocused ? theme.primary : 'transparent',
+            shadowOpacity: isFocused ? 0.15 : 0,
+            elevation: isFocused ? 4 : 0,
+          }
+        ]}
+      >
         {leftIcon}
         <TextInput
-          style={[styles.input, style]}
+          style={[styles.input, { color: theme.textPrimary, marginLeft: leftIcon ? spacing.sm : 0, marginRight: rightIcon ? spacing.sm : 0 }, style]}
           placeholderTextColor={theme.textMuted}
           onFocus={(e) => {
             setIsFocused(true);
@@ -124,8 +82,49 @@ export function Input({
         />
         {rightIcon}
       </View>
-      {error && <Text style={styles.errorText}>{error}</Text>}
-      {success && !error && <Text style={styles.successText}>✓ Valid</Text>}
+      {error && <Text style={[styles.errorText, { color: theme.danger }]}>{error}</Text>}
+      {success && !error && <Text style={[styles.successText, { color: theme.success }]}>✓ Valid</Text>}
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    marginBottom: spacing.md,
+    width: "100%",
+  },
+  label: {
+    ...typography.captionMedium,
+    marginBottom: spacing.xs,
+    marginLeft: spacing.xs,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    fontSize: 12,
+  },
+  inputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    minHeight: 56,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
+  },
+  input: {
+    flex: 1,
+    ...typography.bodyMedium,
+    paddingVertical: spacing.sm,
+    fontSize: 16,
+  },
+  errorText: {
+    ...typography.caption,
+    marginTop: spacing.xs,
+    marginLeft: spacing.xs,
+  },
+  successText: {
+    ...typography.caption,
+    marginTop: spacing.xs,
+    marginLeft: spacing.xs,
+  },
+});

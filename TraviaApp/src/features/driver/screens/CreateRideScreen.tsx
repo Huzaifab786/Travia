@@ -70,7 +70,7 @@ export function CreateRideScreen() {
   const [dropoffAddress, setDropoffAddress] = useState("");
   const [dropoffCoords, setDropoffCoords] = useState<Coords | null>(null);
 
-  const [date, setDate] = useState(new Date());
+  const [date, setDate] = useState(new Date(Date.now() + 15 * 60 * 1000)); // Default to 15 mins from now
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [seatsTotal, setSeatsTotal] = useState("");
@@ -106,8 +106,7 @@ export function CreateRideScreen() {
   const [distanceMeters, setDistanceMeters] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [pricePerSeat, setPricePerSeat] = useState(0);
-  const [manualMeetupPoints, setManualMeetupPoints] = useState<ManualMeetupPoint[]>([]);
-  const [pinMode, setPinMode] = useState(false);
+  const [manualMeetupPoints] = useState<ManualMeetupPoint[]>([]);
 
   const driverGender = user?.user_metadata?.gender ?? null;
   const canCreateFemaleOnly = driverGender === "female";
@@ -466,34 +465,6 @@ export function CreateRideScreen() {
   const hasRoute = distanceMeters > 0;
   const selectedRoute = routeOptions[selectedRouteIndex];
 
-  const addManualMeetupPoint = async (lat: number, lng: number) => {
-    if (manualMeetupPoints.length >= 2) {
-      setMessage("You can pin up to 2 meetup landmarks.");
-      return;
-    }
-
-    try {
-      const res = await reverseGeocodeApi(lat, lng);
-      const placeLabel =
-        res.place?.label || `Pinned landmark ${manualMeetupPoints.length + 1}`;
-
-      setManualMeetupPoints((prev) => [
-        ...prev,
-        {
-          id: `manual-${Date.now()}`,
-          label: placeLabel,
-          address: placeLabel,
-          lat,
-          lng,
-          order: prev.length + 1,
-        },
-      ]);
-      setPinMode(false);
-      setMessage("Pinned meetup landmark added.");
-    } catch {
-      setMessage("Could not add meetup landmark.");
-    }
-  };
 
   return (
     <View style={s.root}>
@@ -509,13 +480,6 @@ export function CreateRideScreen() {
         initialRegion={mapRegion}
         showsUserLocation
         userInterfaceStyle={theme.dark ? "dark" : "light"}
-        onLongPress={(e) => {
-          if (!pinMode) return;
-          addManualMeetupPoint(
-            e.nativeEvent.coordinate.latitude,
-            e.nativeEvent.coordinate.longitude,
-          );
-        }}
       >
         {pickupCoords && (
           <Marker
@@ -550,15 +514,6 @@ export function CreateRideScreen() {
           />
         )}
 
-        {manualMeetupPoints.map((point) => (
-          <Marker
-            key={point.id}
-            coordinate={{ latitude: point.lat, longitude: point.lng }}
-            title={point.label}
-            description={point.address}
-            pinColor={theme.amber}
-          />
-        ))}
       </MapView>
 
       <View style={[s.topBar, { paddingTop: insets.top + 6 }]}>
@@ -812,56 +767,6 @@ export function CreateRideScreen() {
               )}
             </View>
 
-            <Text style={s.sectionLabel}>Manual Meetup Landmarks</Text>
-            <Pressable
-              onPress={() => setPinMode((prev) => !prev)}
-              style={[s.landmarkBtn, pinMode && s.landmarkBtnActive]}
-            >
-              <Ionicons
-                name="map-outline"
-                size={16}
-                color={pinMode ? "#fff" : theme.primary}
-              />
-              <Text
-                style={[
-                  s.landmarkBtnText,
-                  pinMode && s.landmarkBtnTextActive,
-                ]}
-              >
-                {pinMode ? "Tap map to pin landmark" : "Pin landmark on map"}
-              </Text>
-            </Pressable>
-            <Text style={s.landmarkHint}>
-              Long-press the map to add up to 2 meetup landmarks like a petrol
-              pump or main road point.
-            </Text>
-
-            {manualMeetupPoints.length > 0 && (
-              <View style={s.manualPointList}>
-                {manualMeetupPoints.map((point, index) => (
-                  <View key={point.id} style={s.manualPointCard}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.manualPointTitle}>
-                        Landmark {index + 1}
-                      </Text>
-                      <Text style={s.manualPointText} numberOfLines={2}>
-                        {point.label}
-                      </Text>
-                    </View>
-                    <Pressable
-                      onPress={() =>
-                        setManualMeetupPoints((prev) =>
-                          prev.filter((item) => item.id !== point.id),
-                        )
-                      }
-                      style={s.manualRemoveBtn}
-                    >
-                      <Ionicons name="close" size={14} color={theme.danger} />
-                    </Pressable>
-                  </View>
-                ))}
-              </View>
-            )}
 
             {message ? (
               <View

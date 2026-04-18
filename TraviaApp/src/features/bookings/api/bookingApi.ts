@@ -20,6 +20,9 @@ export type BookingQuote = {
   dropoffRouteRatio: number | null;
   totalPrice: number;
   perSeatPrice: number;
+  isCoveredByPass?: boolean;
+  passId?: string | null;
+  paymentMode?: "pass" | "cash" | null;
 };
 
 export type Booking = {
@@ -40,11 +43,19 @@ export type Booking = {
   pricingQuote?: BookingQuote | null;
   status: "pending" | "accepted" | "rejected" | "cancelled";
   createdAt: string;
+  review?: {
+    rideId: string;
+    revieweeId: string;
+    rating: number;
+    comment?: string | null;
+    createdAt: string;
+  } | null;
 };
 
 export const createBookingApi = (payload: {
   rideId: string;
   seatsRequested: number;
+  usePass?: boolean;
   meetupPoint?: {
     id: string;
     label: string;
@@ -65,6 +76,7 @@ export const createBookingApi = (payload: {
 export const quoteBookingApi = (payload: {
   rideId: string;
   seatsRequested: number;
+  usePass?: boolean;
   passengerPickup: PlaceSuggestion;
   passengerDropoff: PlaceSuggestion;
 }) => {

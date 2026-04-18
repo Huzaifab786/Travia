@@ -20,7 +20,6 @@ import {
   PanResponder,
   Dimensions,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, Circle } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
@@ -32,19 +31,18 @@ import {
 } from "../../tracking/api/trackingApi";
 import { completeRideApi } from "../api/driverRideApi";
 import { useTheme } from "../../../app/providers/ThemeProvider";
-import { ENV } from "../../../config/env";
 import { radius, spacing, typography } from "../../../config/theme";
 import type { DriverStackParamList } from "../navigation/DriverNavigator";
+import { getSocket } from "../../../services/socket";
+import { TripTimeline } from "../../../components/common/TripTimeline";
+import { LiveRideStatusPanel } from "../../../components/common/LiveRideStatusPanel";
 
 type DriverLiveRideRouteProp = RouteProp<
   DriverStackParamList,
   "DriverLiveRide"
 >;
 
-const POLL_INTERVAL_MS = 1500;
-const DEMO_TICK_MS = 1000;
-const DEMO_SPEED_METERS_PER_TICK = 35;
-const ALERT_SNOOZE_MS = 10 * 60 * 1000;
+const POLL_INTERVAL_MS = 20000;
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
@@ -70,17 +68,6 @@ function estimateEtaMinutes(distanceKm: number) {
 }
 
 type RoutePoint = { lat: number; lng: number };
-
-function haversineMeters(a: RoutePoint, b: RoutePoint) {
-  return haversineKm(a.lat, a.lng, b.lat, b.lng) * 1000;
-}
-
-function interpolatePoint(a: RoutePoint, b: RoutePoint, t: number): RoutePoint {
-  return {
-    lat: a.lat + (b.lat - a.lat) * t,
-    lng: a.lng + (b.lng - a.lng) * t,
-  };
-}
 
 function bearingBetweenPoints(a: RoutePoint, b: RoutePoint) {
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -115,6 +102,7 @@ export function DriverLiveRideScreen() {
     passengerName,
     passengerPhone,
     meetupPoint,
+    passengerDropoff,
   } = route.params;
 
   const [driverLat, setDriverLat] = useState<number | null>(null);
@@ -124,17 +112,11 @@ export function DriverLiveRideScreen() {
   const [remainingKm, setRemainingKm] = useState<number | null>(null);
   const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
   const [completing, setCompleting] = useState(false);
-  const [isDeviated, setIsDeviated] = useState(false);
-  const [distanceFromRoute, setDistanceFromRoute] = useState<number | null>(
+  const [rideStatus, setRideStatus] = useState<string | null>(null);
+  const [distanceToPickupKm, setDistanceToPickupKm] = useState<number | null>(
     null,
   );
-  const [alertHiddenUntil, setAlertHiddenUntil] = useState<number | null>(null);
-
-  const [demoMode, setDemoMode] = useState(false);
-  const [isDemoRunning, setIsDemoRunning] = useState(false);
-
-  const demoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const demoRouteIndexRef = useRef(0);
+  const [socketConnected, setSocketConnected] = useState(false);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const animatedLat = useRef(new Animated.Value(pickupLat)).current;
@@ -146,13 +128,19 @@ export function DriverLiveRideScreen() {
     lat: pickupLat,
     lng: pickupLng,
   });
+  const animatedDriverRef = useRef({
+    lat: pickupLat,
+    lng: pickupLng,
+  });
   const [carHeading, setCarHeading] = useState(0);
+  const carHeadingRef = useRef(0);
 
   const EXPANDED_Y = 0;
   const COLLAPSED_Y = 250;
   const drawerTranslateY = useRef(new Animated.Value(EXPANDED_Y)).current;
   const drawerLastOffset = useRef(EXPANDED_Y);
   const [drawerExpanded, setDrawerExpanded] = useState(true);
+  const [passengerPickedUp, setPassengerPickedUp] = useState(false);
 
   const rawRoutePoints = useMemo(() => {
     if (!encodedPolyline) return [] as RoutePoint[];
@@ -180,6 +168,130 @@ export function DriverLiveRideScreen() {
       longitude: c.lng,
     }));
   }, [rawRoutePoints]);
+
+  const syncDriverPoint = useCallback((
+    lat: number,
+    lng: number,
+    nextLastUpdate?: string | null,
+    nextStatus?: string | null,
+  ) => {
+    setDriverLat(lat);
+    setDriverLng(lng);
+    animatedDriverRef.current = { lat, lng };
+    if (nextLastUpdate) {
+      setLastUpdate(nextLastUpdate);
+    }
+    if (nextStatus) {
+      setRideStatus(nextStatus);
+    }
+
+    if (meetupPoint && !passengerPickedUp) {
+      setDistanceToPickupKm(
+        haversineKm(lat, lng, meetupPoint.lat, meetupPoint.lng),
+      );
+    } else {
+      setDistanceToPickupKm(null);
+    }
+
+    const remainingTarget = passengerPickedUp && passengerDropoff
+      ? passengerDropoff
+      : { lat: dropoffLat, lng: dropoffLng };
+    const remaining = haversineKm(
+      lat,
+      lng,
+      remainingTarget.lat,
+      remainingTarget.lng,
+    );
+    setRemainingKm(remaining);
+    setEtaMinutes(estimateEtaMinutes(remaining));
+
+    if (!hasInitialDriverFix.current) {
+      animatedLat.setValue(lat);
+      animatedLng.setValue(lng);
+      setAnimatedDriver({ lat, lng });
+      hasInitialDriverFix.current = true;
+    } else {
+      const previousPoint = animatedDriverRef.current;
+      const nextPoint = { lat, lng };
+
+      if (
+        previousPoint.lat !== nextPoint.lat ||
+        previousPoint.lng !== nextPoint.lng
+      ) {
+        const heading = bearingBetweenPoints(previousPoint, nextPoint);
+        carHeadingRef.current = heading;
+        setCarHeading(heading);
+      }
+
+      Animated.parallel([
+        Animated.timing(animatedLat, {
+          toValue: lat,
+          duration: 900,
+          easing: Easing.linear,
+          useNativeDriver: false,
+        }),
+        Animated.timing(animatedLng, {
+          toValue: lng,
+          duration: 900,
+          easing: Easing.linear,
+          useNativeDriver: false,
+        }),
+      ]).start();
+    }
+
+    animatedDriverRef.current = { lat, lng };
+
+    cameraMoveCounter.current += 1;
+
+    if (mapRef.current && cameraMoveCounter.current % 2 === 0) {
+      if (meetupPoint && !passengerPickedUp) {
+        mapRef.current.fitToCoordinates(
+          [
+            { latitude: lat, longitude: lng },
+            { latitude: meetupPoint.lat, longitude: meetupPoint.lng },
+          ],
+          {
+            edgePadding: { top: 160, right: 80, bottom: 320, left: 80 },
+            animated: true,
+          },
+        );
+      } else if (passengerPickedUp) {
+        const destLat = passengerDropoff ? passengerDropoff.lat : dropoffLat;
+        const destLng = passengerDropoff ? passengerDropoff.lng : dropoffLng;
+        mapRef.current.fitToCoordinates(
+          [
+            { latitude: lat, longitude: lng },
+            { latitude: destLat, longitude: destLng },
+          ],
+          {
+            edgePadding: { top: 160, right: 80, bottom: 320, left: 80 },
+            animated: true,
+          },
+        );
+      } else {
+        mapRef.current.animateCamera(
+          {
+            center: {
+              latitude: lat,
+              longitude: lng,
+            },
+            zoom: 17,
+            heading: carHeadingRef.current,
+            pitch: 0,
+          },
+          { duration: 700 },
+        );
+      }
+    }
+  }, [
+    dropoffLat,
+    dropoffLng,
+    meetupPoint,
+    passengerDropoff,
+    passengerPickedUp,
+    animatedLat,
+    animatedLng,
+  ]);
 
   const animateDrawerTo = (toValue: number) => {
     Animated.spring(drawerTranslateY, {
@@ -221,13 +333,22 @@ export function DriverLiveRideScreen() {
   ).current;
 
   useEffect(() => {
-    if (routeCoords.length > 0 && mapRef.current) {
+    if (mapRef.current) {
       const timer = setTimeout(() => {
-        mapRef.current?.fitToCoordinates(routeCoords, {
-          edgePadding: { top: 140, right: 50, bottom: 260, left: 50 },
+        const coordsToFit = meetupPoint
+          ? [
+              { latitude: pickupLat, longitude: pickupLng },
+              { latitude: meetupPoint.lat, longitude: meetupPoint.lng },
+            ]
+          : routeCoords.length > 0
+          ? routeCoords
+          : [{ latitude: pickupLat, longitude: pickupLng }, { latitude: dropoffLat, longitude: dropoffLng }];
+
+        mapRef.current?.fitToCoordinates(coordsToFit, {
+          edgePadding: { top: 160, right: 80, bottom: 320, left: 80 },
           animated: true,
         });
-      }, 500);
+      }, 600);
 
       return () => clearTimeout(timer);
     }
@@ -268,80 +389,6 @@ export function DriverLiveRideScreen() {
     };
   }, [animatedLat, animatedLng]);
 
-  const stopDemoMode = () => {
-    if (demoIntervalRef.current) {
-      clearInterval(demoIntervalRef.current);
-      demoIntervalRef.current = null;
-    }
-    demoRouteIndexRef.current = 0;
-    setIsDemoRunning(false);
-  };
-
-  const startDemoMode = async () => {
-    if (rawRoutePoints.length < 2) {
-      Alert.alert("Demo Error", "This ride has no route points saved.");
-      return;
-    }
-
-    stopDemoMode();
-    setIsDemoRunning(true);
-
-    let segmentIndex = 0;
-    let segmentProgress = 0;
-
-    const sendDemo = async () => {
-      try {
-        if (segmentIndex >= rawRoutePoints.length - 1) {
-          stopDemoMode();
-          return;
-        }
-
-        const start = rawRoutePoints[segmentIndex];
-        const end = rawRoutePoints[segmentIndex + 1];
-
-        const segmentDistance = haversineMeters(start, end);
-
-        if (segmentDistance < 1) {
-          segmentIndex += 1;
-          segmentProgress = 0;
-          return;
-        }
-
-        const progressStep = DEMO_SPEED_METERS_PER_TICK / segmentDistance;
-        segmentProgress += progressStep;
-
-        if (segmentProgress >= 1) {
-          segmentIndex += 1;
-          segmentProgress = 0;
-
-          if (segmentIndex >= rawRoutePoints.length - 1) {
-            const lastPoint = rawRoutePoints[rawRoutePoints.length - 1];
-            await updateLocationApi(rideId, lastPoint.lat, lastPoint.lng);
-            stopDemoMode();
-            return;
-          }
-        }
-
-        const currentStart = rawRoutePoints[segmentIndex];
-        const currentEnd = rawRoutePoints[segmentIndex + 1];
-        const nextPoint = interpolatePoint(
-          currentStart,
-          currentEnd,
-          segmentProgress,
-        );
-
-        await updateLocationApi(rideId, nextPoint.lat, nextPoint.lng);
-      } catch {
-        // ignore demo tick failures
-      }
-    };
-
-    const first = rawRoutePoints[0];
-    await updateLocationApi(rideId, first.lat, first.lng);
-
-    demoIntervalRef.current = setInterval(sendDemo, DEMO_TICK_MS);
-  };
-
   const startRealBroadcast = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
 
@@ -375,75 +422,8 @@ export function DriverLiveRideScreen() {
         const data = await getDriverLocationApi(rideId);
 
         if (data.lat != null && data.lng != null) {
-          setDriverLat(data.lat);
-          setDriverLng(data.lng);
-          setLastUpdate(data.lastUpdate);
-          setIsDeviated(data.isDeviated ?? false);
-          setDistanceFromRoute(data.distanceFromRoute ?? null);
-
-          const remaining = haversineKm(
-            data.lat,
-            data.lng,
-            dropoffLat,
-            dropoffLng,
-          );
-          setRemainingKm(remaining);
-          setEtaMinutes(estimateEtaMinutes(remaining));
-
-          if (!hasInitialDriverFix.current) {
-            animatedLat.setValue(data.lat);
-            animatedLng.setValue(data.lng);
-            setAnimatedDriver({ lat: data.lat, lng: data.lng });
-            hasInitialDriverFix.current = true;
-          } else {
-            const previousPoint = {
-              lat: animatedDriver.lat,
-              lng: animatedDriver.lng,
-            };
-            const nextPoint = {
-              lat: data.lat,
-              lng: data.lng,
-            };
-
-            if (
-              previousPoint.lat !== nextPoint.lat ||
-              previousPoint.lng !== nextPoint.lng
-            ) {
-              setCarHeading(bearingBetweenPoints(previousPoint, nextPoint));
-            }
-
-            Animated.parallel([
-              Animated.timing(animatedLat, {
-                toValue: data.lat,
-                duration: 900,
-                easing: Easing.linear,
-                useNativeDriver: false,
-              }),
-              Animated.timing(animatedLng, {
-                toValue: data.lng,
-                duration: 900,
-                easing: Easing.linear,
-                useNativeDriver: false,
-              }),
-            ]).start();
-          }
-
-          cameraMoveCounter.current += 1;
-
-          if (mapRef.current && cameraMoveCounter.current % 2 === 0) {
-            mapRef.current.animateCamera(
-              {
-                center: {
-                  latitude: data.lat,
-                  longitude: data.lng,
-                },
-                zoom: 17,
-                heading: carHeading,
-                pitch: 0,
-              },
-              { duration: 700 },
-            );
-          }
+          setRideStatus(data.status ?? null);
+          syncDriverPoint(data.lat, data.lng, data.lastUpdate, data.status);
         }
       } catch {
         // ignore polling failure
@@ -453,103 +433,75 @@ export function DriverLiveRideScreen() {
     };
 
     fetchLocation();
+    if (socketConnected) {
+      return;
+    }
+
     const timer = setInterval(fetchLocation, POLL_INTERVAL_MS);
 
     return () => clearInterval(timer);
-  }, [rideId, dropoffLat, dropoffLng, animatedLat, animatedLng]);
+  }, [rideId, syncDriverPoint, socketConnected]);
 
   useEffect(() => {
-    let cancelled = false;
+    const socket = getSocket();
+    if (!socket) {
+      setSocketConnected(false);
+      return;
+    }
 
-    const loadDismissState = async () => {
-      try {
-        const raw = await AsyncStorage.getItem(
-          `@travia.routeAlertDismissed.${rideId}`,
-        );
-        const parsed = raw ? Number(raw) : null;
-
-        if (!cancelled && parsed && parsed > Date.now()) {
-          setAlertHiddenUntil(parsed);
-          return;
-        }
-
-        if (!cancelled) {
-          setAlertHiddenUntil(null);
-        }
-      } catch {
-        if (!cancelled) {
-          setAlertHiddenUntil(null);
-        }
+    const syncConnection = () => setSocketConnected(Boolean(socket.connected));
+    const handleLocationUpdated = (payload: any) => {
+      if (payload?.rideId !== rideId || payload.lat == null || payload.lng == null) {
+        return;
       }
+
+      syncDriverPoint(
+        Number(payload.lat),
+        Number(payload.lng),
+        payload.lastUpdate ?? null,
+        payload.status ?? null,
+      );
+      setLoading(false);
     };
 
-    loadDismissState();
+    const handleStatusUpdated = (payload: any) => {
+      if (payload?.rideId !== rideId || !payload.status) {
+        return;
+      }
+
+      setRideStatus(payload.status);
+    };
+
+    syncConnection();
+    socket.emit("join_ride", rideId);
+    socket.on("connect", syncConnection);
+    socket.on("disconnect", syncConnection);
+    socket.on("ride_location_updated", handleLocationUpdated);
+    socket.on("ride_status_updated", handleStatusUpdated);
+    socket.on("ride_started", handleStatusUpdated);
+    socket.on("ride_completed", handleStatusUpdated);
 
     return () => {
-      cancelled = true;
+      socket.emit("leave_ride", rideId);
+      socket.off("connect", syncConnection);
+      socket.off("disconnect", syncConnection);
+      socket.off("ride_location_updated", handleLocationUpdated);
+      socket.off("ride_status_updated", handleStatusUpdated);
+      socket.off("ride_started", handleStatusUpdated);
+      socket.off("ride_completed", handleStatusUpdated);
     };
-  }, [rideId]);
-
-  useEffect(() => {
-    if (!alertHiddenUntil) {
-      return;
-    }
-
-    const delay = Math.max(alertHiddenUntil - Date.now(), 0);
-    const timer = setTimeout(() => {
-      setAlertHiddenUntil(null);
-    }, delay);
-
-    return () => clearTimeout(timer);
-  }, [alertHiddenUntil]);
-
-  const shouldShowDeviationAlert =
-    isDeviated && (!alertHiddenUntil || alertHiddenUntil <= Date.now());
-
-  const snoozeDeviationAlert = async () => {
-    const expiry = Date.now() + ALERT_SNOOZE_MS;
-    setAlertHiddenUntil(expiry);
-
-    try {
-      await AsyncStorage.setItem(
-        `@travia.routeAlertDismissed.${rideId}`,
-        String(expiry),
-      );
-    } catch {
-      // silent
-    }
-  };
-
-  const contactAdmin = async () => {
-    if (!ENV.ADMIN_SUPPORT_PHONE) {
-      Alert.alert(
-        "Admin Contact",
-        "Admin support number is not configured yet.",
-      );
-      return;
-    }
-
-    try {
-      await Linking.openURL(`tel:${ENV.ADMIN_SUPPORT_PHONE}`);
-    } catch {
-      Alert.alert("Admin Contact", "Unable to open phone dialer.");
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      stopDemoMode();
-    };
-  }, []);
+  }, [rideId, syncDriverPoint]);
 
   const openInMaps = async () => {
     const originLat = driverLat ?? pickupLat;
     const originLng = driverLng ?? pickupLng;
+    const destLat = passengerDropoff ? passengerDropoff.lat : dropoffLat;
+    const destLng = passengerDropoff ? passengerDropoff.lng : dropoffLng;
 
     const url =
       Platform.OS === "ios"
-        ? `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${dropoffLat},${dropoffLng}&travelmode=driving`
-        : `http://maps.apple.com/?saddr=${originLat},${originLng}&daddr=${dropoffLat},${dropoffLng}&dirflg=d`;
+        ? `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`
+        : `http://maps.apple.com/?saddr=${originLat},${originLng}&daddr=${destLat},${destLng}&dirflg=d`;
     try {
       await Linking.openURL(url);
     } catch {}
@@ -571,7 +523,6 @@ export function DriverLiveRideScreen() {
         onPress: async () => {
           try {
             setCompleting(true);
-            stopDemoMode();
             await completeRideApi(rideId);
             navigation.goBack();
           } catch (e: any) {
@@ -591,6 +542,51 @@ export function DriverLiveRideScreen() {
     longitudeDelta: 0.05,
   };
 
+  const isArrived =
+    passengerPickedUp ||
+    (distanceToPickupKm != null && distanceToPickupKm <= 0.25);
+  const isStarted = passengerPickedUp || rideStatus === "in_progress";
+  const isCompleted = rideStatus === "completed";
+  const tripSteps = useMemo(
+    () => [
+      {
+        key: "accepted",
+        label: "Accepted",
+        description: "Passenger booking confirmed.",
+        state: "complete" as const,
+      },
+      {
+        key: "driver_on_way",
+        label: "Driver on way",
+        description: "Live route tracking is active.",
+        state: isCompleted || isStarted || isArrived ? ("complete" as const) : ("active" as const),
+      },
+      {
+        key: "arrived",
+        label: "Arrived",
+        description: isArrived
+          ? "Driver reached the pickup point."
+          : "Driver is approaching the pickup point.",
+        state: isCompleted || isStarted || isArrived ? ("complete" as const) : ("upcoming" as const),
+      },
+      {
+        key: "started",
+        label: "Started",
+        description: isStarted
+          ? "Ride has started."
+          : "Starts once the passenger is picked up.",
+        state: isCompleted || isStarted ? ("complete" as const) : ("upcoming" as const),
+      },
+      {
+        key: "completed",
+        label: "Completed",
+        description: "Trip ends here.",
+        state: isCompleted ? ("active" as const) : ("upcoming" as const),
+      },
+    ],
+    [isArrived, isStarted, isCompleted],
+  );
+
   const s = makeStyles(theme);
 
   return (
@@ -609,77 +605,6 @@ export function DriverLiveRideScreen() {
           <Ionicons name="map-outline" size={18} color={theme.primary} />
         </Pressable>
       </View>
-
-      {(!isDeviated || shouldShowDeviationAlert) && (
-        <View style={[s.routeBanner, !isDeviated ? s.routeBannerSafe : null]}>
-          <View
-            style={[s.routeIconWrap, !isDeviated ? s.routeIconWrapSafe : null]}
-          >
-            <Ionicons
-              name={isDeviated ? "warning" : "checkmark-circle"}
-              size={18}
-              color={isDeviated ? "#fff" : theme.success}
-            />
-          </View>
-
-          <View style={s.routeBannerBody}>
-            <View style={s.routeBannerHeader}>
-              <Text
-                style={[
-                  s.routeBannerTitle,
-                  !isDeviated ? { color: theme.success } : null,
-                ]}
-              >
-                {isDeviated ? "Route deviation" : "Route on track"}
-              </Text>
-              <View style={[s.routeChip, !isDeviated ? s.routeChipSafe : null]}>
-                <Text
-                  style={[
-                    s.routeChipText,
-                    !isDeviated ? { color: theme.success } : null,
-                  ]}
-                >
-                  {isDeviated ? "Check now" : "All clear"}
-                </Text>
-              </View>
-            </View>
-
-            <Text
-              style={[
-                s.routeBannerSub,
-                !isDeviated ? { color: theme.textSecondary } : null,
-              ]}
-            >
-              {isDeviated
-                ? "Driver is away from the selected path and should get back on route."
-                : "Driver is following the selected route normally."}
-            </Text>
-
-            <Text
-              style={[
-                s.routeBannerMeta,
-                !isDeviated ? { color: theme.textSecondary } : null,
-              ]}
-            >
-              {distanceFromRoute != null
-                ? `${Math.round(distanceFromRoute)}m from route`
-                : "Tracking live route status"}
-            </Text>
-
-            {isDeviated && (
-              <View style={s.routeActions}>
-                <Pressable onPress={contactAdmin} style={s.routePrimaryBtn}>
-                  <Ionicons name="call-outline" size={16} color="#fff" />
-                  <Text style={s.routePrimaryBtnText}>Call Admin</Text>
-                </Pressable>
-                <Pressable onPress={snoozeDeviationAlert} style={s.routeGhostBtn}>
-                  <Text style={s.routeGhostBtnText}>Hide 10 min</Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
-        </View>
-      )}
 
       <MapView
         ref={mapRef}
@@ -708,8 +633,11 @@ export function DriverLiveRideScreen() {
         </Marker>
 
         <Marker
-          coordinate={{ latitude: dropoffLat, longitude: dropoffLng }}
-          title="Destination"
+          coordinate={{ 
+            latitude: passengerDropoff ? passengerDropoff.lat : dropoffLat, 
+            longitude: passengerDropoff ? passengerDropoff.lng : dropoffLng 
+          }}
+          title={passengerDropoff ? "Passenger Dropoff" : "Destination"}
         >
           <View style={s.markerContainer}>
             <View style={[s.dot, { backgroundColor: theme.danger }]} />
@@ -830,6 +758,8 @@ export function DriverLiveRideScreen() {
           </View>
         )}
 
+        <TripTimeline steps={tripSteps} theme={theme} />
+
         {loading && !driverLat ? (
           <View style={s.loadingState}>
             <ActivityIndicator color={theme.primary} />
@@ -837,17 +767,64 @@ export function DriverLiveRideScreen() {
           </View>
         ) : (
           <>
-            <View style={s.driverInfo}>
-              <View style={s.driverIcon}>
-                <Ionicons name="navigate" size={20} color={theme.primary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.statusLabel}>Trip in progress</Text>
-                <Text style={s.statusSub}>
-                  Keep following your route safely
-                </Text>
-              </View>
-            </View>
+            <LiveRideStatusPanel
+              theme={theme}
+              iconName="navigate"
+              iconColor={theme.primary}
+              title={
+                isCompleted
+                  ? "Trip completed"
+                  : isStarted
+                    ? "Trip in progress"
+                    : isArrived
+                      ? "Driver arrived"
+                      : "Driver is on the way"
+              }
+              subtitle={
+                isCompleted
+                  ? "This ride is finished."
+                  : isArrived
+                    ? "Driver is at the pickup point."
+                    : "Keep following your route safely"
+              }
+              stats={[
+                {
+                  value: remainingKm != null ? `${remainingKm.toFixed(1)} km` : "--",
+                  label: "Remaining",
+                },
+                {
+                  value: etaMinutes != null ? `${etaMinutes} min` : "--",
+                  label: "Approx ETA",
+                },
+              ]}
+            >
+              {meetupPoint && (
+                <View style={s.phaseCard}>
+                  <View style={s.phaseIndicator}>
+                    <View style={[s.phaseDot, !passengerPickedUp && s.phaseDotActive]} />
+                    <View style={[s.phaseLine, passengerPickedUp && s.phaseLineActive]} />
+                    <View style={[s.phaseDot, passengerPickedUp && s.phaseDotActive]} />
+                  </View>
+                  <View style={s.phaseLabels}>
+                    <Text style={[s.phaseLabel, !passengerPickedUp && s.phaseLabelActive]}>
+                      Head to Passenger
+                    </Text>
+                    <Text style={[s.phaseLabel, passengerPickedUp && s.phaseLabelActive]}>
+                      Head to Destination
+                    </Text>
+                  </View>
+                  {!passengerPickedUp && (
+                    <Pressable
+                      onPress={() => setPassengerPickedUp(true)}
+                      style={s.pickedUpBtn}
+                    >
+                      <Ionicons name="checkmark-circle" size={16} color="#fff" />
+                      <Text style={s.pickedUpBtnText}>Passenger Picked Up</Text>
+                    </Pressable>
+                  )}
+                </View>
+              )}
+            </LiveRideStatusPanel>
 
             <View style={s.liveActionRow}>
               <Pressable onPress={openInMaps} style={s.livePrimaryBtn}>
@@ -864,101 +841,26 @@ export function DriverLiveRideScreen() {
                 ]}
               >
                 <Ionicons name="call-outline" size={16} color={theme.primary} />
-                <Text style={s.liveSecondaryBtnText}>Call Passenger</Text>
+                <Text style={s.liveSecondaryBtnText}>Call</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => (navigation as any).navigate("Chat", { rideId })}
+                style={s.liveSecondaryBtn}
+              >
+                <Ionicons name="chatbubble-outline" size={16} color={theme.primary} />
+                <Text style={s.liveSecondaryBtnText}>Chat</Text>
               </Pressable>
             </View>
 
-            <View style={s.tripStatsRow}>
-              <View style={s.tripStatCard}>
-                <Ionicons
-                  name="navigate-outline"
-                  size={16}
-                  color={theme.primary}
-                />
-                <Text style={s.tripStatValue}>
-                  {remainingKm != null ? `${remainingKm.toFixed(1)} km` : "--"}
-                </Text>
-                <Text style={s.tripStatLabel}>Remaining</Text>
-              </View>
-
-              <View style={s.tripStatCard}>
-                <Ionicons name="time-outline" size={16} color={theme.primary} />
-                <Text style={s.tripStatValue}>
-                  {etaMinutes != null ? `${etaMinutes} min` : "--"}
-                </Text>
-                <Text style={s.tripStatLabel}>Approx ETA</Text>
-              </View>
-            </View>
-
-            <Pressable
-              onPress={() => {
-                const next = !demoMode;
-                setDemoMode(next);
-                if (!next) {
-                  stopDemoMode();
-                }
-              }}
-              style={s.demoCard}
-            >
-              <View style={s.demoLeft}>
-                <View style={s.demoIconWrap}>
-                  <Ionicons
-                    name="flask-outline"
-                    size={20}
-                    color={theme.primary}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.demoTitle}>Demo Movement Mode</Text>
-                  <Text style={s.demoSubtitle}>
-                    {demoMode
-                      ? "Simulating route GPS"
-                      : "Use demo movement for evaluation"}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={[s.demoBadge, demoMode && s.demoBadgeActive]}>
-                <Text
-                  style={[
-                    s.demoBadgeText,
-                    { color: demoMode ? theme.primary : theme.textMuted },
-                  ]}
-                >
-                  {demoMode ? "ON" : "OFF"}
-                </Text>
-              </View>
-            </Pressable>
-
             <View style={s.actionRow}>
-              <Pressable
-                onPress={
-                  demoMode
-                    ? isDemoRunning
-                      ? stopDemoMode
-                      : startDemoMode
-                    : startRealBroadcast
-                }
-                style={s.secondaryBtn}
-              >
+              <Pressable onPress={startRealBroadcast} style={s.secondaryBtn}>
                 <Ionicons
-                  name={
-                    demoMode
-                      ? isDemoRunning
-                        ? "pause-outline"
-                        : "play-outline"
-                      : "radio-outline"
-                  }
+                  name="radio-outline"
                   size={18}
                   color={theme.primary}
                 />
-                <Text style={s.secondaryBtnText}>
-                  {demoMode
-                    ? isDemoRunning
-                      ? "Stop Demo"
-                      : "Start Demo"
-                    : "Start Live"}
-                </Text>
+                <Text style={s.secondaryBtnText}>Start Live</Text>
               </Pressable>
             </View>
 
@@ -984,6 +886,7 @@ export function DriverLiveRideScreen() {
         )}
         </ScrollView>
       </Animated.View>
+
     </SafeAreaView>
   );
 }
@@ -1040,107 +943,6 @@ function makeStyles(theme: any) {
       justifyContent: "center",
       backgroundColor: theme.primarySubtle,
     },
-    routeBanner: {
-      position: "absolute",
-      top: 116,
-      left: 16,
-      right: 16,
-      zIndex: 15,
-      backgroundColor: theme.danger,
-      borderRadius: radius.xl,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.md,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
-      shadowColor: "#000",
-      shadowOpacity: 0.16,
-      shadowRadius: 10,
-      elevation: 4,
-    },
-    routeBannerSafe: {
-      backgroundColor: theme.surface,
-      borderWidth: 1,
-      borderColor: theme.success + "33",
-    },
-    routeIconWrap: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: "rgba(255,255,255,0.16)",
-    },
-    routeIconWrapSafe: {
-      backgroundColor: theme.successBg,
-    },
-    routeBannerBody: {
-      flex: 1,
-      gap: 4,
-    },
-    routeBannerHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 10,
-    },
-    routeBannerTitle: {
-      color: "#fff",
-      ...typography.bodySemiBold,
-      flex: 1,
-    },
-    routeChip: {
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 999,
-      backgroundColor: "rgba(255,255,255,0.16)",
-    },
-    routeChipSafe: {
-      backgroundColor: theme.successBg,
-    },
-    routeChipText: {
-      color: "#fff",
-      ...typography.captionMedium,
-      fontWeight: "700",
-    },
-    routeBannerSub: { color: "rgba(255,255,255,0.9)", ...typography.caption },
-    routeBannerMeta: {
-      color: "rgba(255,255,255,0.85)",
-      ...typography.caption,
-      fontWeight: "600",
-    },
-    routeActions: {
-      flexDirection: "row",
-      gap: 10,
-      marginTop: 8,
-    },
-    routePrimaryBtn: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 8,
-      borderRadius: 999,
-      backgroundColor: "rgba(255,255,255,0.16)",
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-    },
-    routePrimaryBtnText: {
-      color: "#fff",
-      ...typography.captionMedium,
-      fontWeight: "700",
-    },
-    routeGhostBtn: {
-      borderRadius: 999,
-      backgroundColor: "rgba(255,255,255,0.10)",
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-    },
-    routeGhostBtnText: {
-      color: "#fff",
-      ...typography.captionMedium,
-      fontWeight: "700",
-    },
-
     drawerCard: {
       position: "absolute",
       left: 16,
@@ -1236,22 +1038,6 @@ function makeStyles(theme: any) {
       color: theme.textSecondary,
     },
 
-    driverInfo: { flexDirection: "row", alignItems: "center", gap: 14 },
-    driverIcon: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: theme.primarySubtle,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    statusLabel: { ...typography.bodyMedium, color: theme.textPrimary },
-    statusSub: {
-      ...typography.captionMedium,
-      color: theme.textSecondary,
-      marginTop: 2,
-    },
-
     liveActionRow: {
       flexDirection: "row",
       gap: spacing.sm,
@@ -1289,29 +1075,63 @@ function makeStyles(theme: any) {
       color: theme.primary,
     },
 
-    tripStatsRow: {
-      flexDirection: "row",
-      gap: spacing.sm,
-      marginTop: spacing.lg,
-    },
-    tripStatCard: {
-      flex: 1,
+    phaseCard: {
       backgroundColor: theme.surfaceElevated,
       borderRadius: radius.lg,
-      paddingVertical: spacing.md,
-      paddingHorizontal: spacing.md,
-      alignItems: "center",
+      padding: spacing.md,
+      marginBottom: spacing.md,
       borderWidth: 1,
       borderColor: theme.border,
-      gap: 4,
+      gap: spacing.sm,
     },
-    tripStatValue: {
-      ...typography.bodySemiBold,
-      color: theme.textPrimary,
+    phaseIndicator: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 0,
     },
-    tripStatLabel: {
+    phaseDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      backgroundColor: theme.border,
+    },
+    phaseDotActive: {
+      backgroundColor: "#F59E0B",
+    },
+    phaseLine: {
+      flex: 1,
+      height: 3,
+      backgroundColor: theme.border,
+    },
+    phaseLineActive: {
+      backgroundColor: "#F59E0B",
+    },
+    phaseLabels: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    phaseLabel: {
       ...typography.caption,
-      color: theme.textSecondary,
+      color: theme.textMuted,
+      flex: 1,
+    },
+    phaseLabelActive: {
+      color: "#F59E0B",
+      fontWeight: "700",
+    },
+    pickedUpBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.xs,
+      backgroundColor: "#16A34A",
+      paddingVertical: spacing.sm,
+      borderRadius: radius.md,
+      marginTop: spacing.xs,
+    },
+    pickedUpBtnText: {
+      ...typography.bodySemiBold,
+      color: "#fff",
     },
 
     demoCard: {

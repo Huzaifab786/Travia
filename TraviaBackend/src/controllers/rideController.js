@@ -1,4 +1,7 @@
+const prisma = require("../config/db");
 const rideService = require("../services/rideService");
+const { getIo } = require("../socket");
+const { emitMultipleUserNotifications } = require("../services/notificationService");
 
 const createRide = async (req, res) => {
   const {
@@ -129,11 +132,21 @@ const updateRideLocation = async (req, res) => {
   }
 
   const result = await rideService.updateDriverLocation(req.user.id, id, Number(lat), Number(lng));
+  try {
+    getIo().to(`ride_${id}`).emit("ride_location_updated", {
+      rideId: id,
+      lat: result.lat,
+      lng: result.lng,
+      lastUpdate: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error("Socket error", e);
+  }
   return res.status(200).json(result);
 };
 
 /**
- * GET /rides/:id/location
+ * PATCH /rides/:id/location
  * Passenger polls for the driver's current position.
  */
 const getRideLocation = async (req, res) => {
@@ -143,12 +156,70 @@ const getRideLocation = async (req, res) => {
 };
 
 /**
+ * PATCH /rides/:id/start
+ * Driver marks the ride as in progress.
+ */
+const startRideController = async (req, res) => {
+  const { id } = req.params;
+  const ride = await rideService.startRide(req.user.id, id);
+  try {
+    getIo().to(`ride_${id}`).emit("ride_started", { rideId: id, status: ride.status });
+    getIo().to(`ride_${id}`).emit("ride_status_updated", {
+      rideId: id,
+      status: ride.status,
+    });
+    const passengers = await prisma.booking.findMany({
+      where: { rideId: id, status: { in: ["accepted", "picked_up"] } },
+      select: { passengerId: true },
+    });
+    emitMultipleUserNotifications(
+      [req.user.id, ...passengers.map((booking) => booking.passengerId)],
+      (userId) => ({
+        userId,
+        title: "Ride started",
+        body:
+          userId === req.user.id
+            ? "You started the ride."
+            : "Your driver has started the ride.",
+        type: "ride_started",
+        data: { rideId: id, status: ride.status },
+      }),
+    );
+  } catch (e) { console.error("Socket error", e); }
+  return res.status(200).json({ ride });
+};
+
+/**
  * PATCH /rides/:id/complete
  * Driver marks the ride as completed.
  */
 const completeRideController = async (req, res) => {
   const { id } = req.params;
   const ride = await rideService.completeRide(req.user.id, id);
+  try {
+    getIo().to(`ride_${id}`).emit("ride_completed", { rideId: id, status: ride.status });
+    getIo().to(`ride_${id}`).emit("ride_status_updated", {
+      rideId: id,
+      status: ride.status,
+    });
+    const passengers = await prisma.booking.findMany({
+      where: { rideId: id, status: "dropped_off" },
+      select: { passengerId: true },
+    });
+    emitMultipleUserNotifications(
+      [req.user.id, ...passengers.map((booking) => booking.passengerId)],
+      (userId) => ({
+        userId,
+        title: "Ride completed",
+        body:
+          userId === req.user.id
+            ? "You completed the ride."
+            : "Your ride has been completed.",
+        type: "ride_completed",
+        data: { rideId: id, status: ride.status },
+      }),
+    );
+  } catch (e) { console.error("Socket error", e); }
   return res.status(200).json({ ride });
 };
 
@@ -175,6 +246,7 @@ module.exports = {
   cancelRide,
   updateRideLocation,
   getRideLocation,
+  startRideController,
   completeRideController,
   deleteRideController,
 };

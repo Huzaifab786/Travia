@@ -9,6 +9,8 @@ const links = [
   { href: "/drivers", label: "Drivers" },
   { href: "/rides", label: "Rides" },
   { href: "/live-tracking", label: "Live Tracking" },
+  { href: "/safety", label: "Safety Center" },
+  { href: "/appeals", label: "Account Appeals" },
   { href: "/bookings", label: "Bookings" },
   { href: "/pricing", label: "Pricing" },
 ];

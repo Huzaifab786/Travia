@@ -12,12 +12,16 @@ import { VehicleDetailsScreen } from "../screens/VehicleDetailsScreen";
 import { DriverVerificationScreen } from "../screens/DriverVerificationScreen";
 import { ProfileScreen } from "../../auth/screens/ProfileScreen";
 import { DriverLiveRideScreen } from "../screens/DriverLiveRideScreen";
+import { DriverPassesScreen } from "../screens/DriverPassesScreen";
 import { ThemeContext } from "../../../app/providers/ThemeProvider";
+import { ChatScreen } from "../../shared/screens/ChatScreen";
+import { NotificationsScreen } from "../../shared/screens/NotificationsScreen";
 
 export type DriverStackParamList = {
   DriverTabs: undefined;
   DriverHome: undefined;
   MyRides: undefined;
+  CommuterPasses: undefined;
   CreateRide:
     | {
         selectedPlace?: PlaceSuggestion;
@@ -55,7 +59,14 @@ export type DriverStackParamList = {
       order?: number;
       source?: string;
     } | null;
+    passengerDropoff?: {
+      lat: number;
+      lng: number;
+      label?: string | null;
+    } | null;
   };
+  Chat: { rideId: string };
+  Notifications: undefined;
 };
 
 const Stack = createNativeStackNavigator<DriverStackParamList>();
@@ -102,6 +113,16 @@ function DriverTabNavigator() {
           title: "My Rides",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="car-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="CommuterPasses"
+        component={DriverPassesScreen}
+        options={{
+          title: "Subscribers",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="card-outline" size={size} color={color} />
           ),
         }}
       />
@@ -155,6 +176,16 @@ export function DriverNavigator() {
       <Stack.Screen
         name="DriverLiveRide"
         component={DriverLiveRideScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={ChatScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={NotificationsScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

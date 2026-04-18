@@ -38,3 +38,9 @@ export const syncUserApi = (payload: {
     body: JSON.stringify(payload),
   });
 };
+
+export const getCurrentUserApi = () => {
+  return apiClient<{ user: { id: string; email: string; role: UserRole; accountStatus: string; accountSuspensionReason?: string | null } }>(
+    "/api/auth/me",
+  );
+};

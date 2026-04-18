@@ -35,7 +35,7 @@ export function PassengerMapPickerScreen() {
   const navigation = useNavigation<PassengerMapPickerNavProp>();
   const route = useRoute<PassengerMapPickerRouteProp>();
 
-  const { initialLocation, field } = route.params;
+  const { initialLocation, field, returnTo, ride } = route.params;
 
   const [region, setRegion] = useState<Region>({
     latitude: initialLocation?.lat || 24.8607,
@@ -89,20 +89,42 @@ export function PassengerMapPickerScreen() {
   const handleConfirm = () => {
     if (!selectedPlace) return;
 
-    navigation.dispatch(
-      StackActions.popTo("PassengerTabs", {
-        screen: "PassengerHome",
-        params: {
-          selectedField: field,
-          selectedPlace: {
-            id: `${selectedPlace.lat}-${selectedPlace.lng}`,
-            label: selectedPlace.label,
-            lat: selectedPlace.lat,
-            lng: selectedPlace.lng,
+    const selected = {
+      id: `${selectedPlace.lat}-${selectedPlace.lng}`,
+      label: selectedPlace.label,
+      lat: selectedPlace.lat,
+      lng: selectedPlace.lng,
+    };
+
+    if (returnTo === "RideDetails") {
+      if (!ride) {
+        navigation.navigate("PassengerTabs", {
+          screen: "PassengerHome",
+          params: {
+            selectedField: field,
+            selectedPlace: selected,
           },
-        },
-      }),
-    );
+        });
+        return;
+      }
+
+      navigation.dispatch(
+        StackActions.popTo("RideDetails", {
+          ride,
+          selectedField: field,
+          selectedPlace: selected,
+        }),
+      );
+      return;
+    }
+
+    navigation.navigate("PassengerTabs", {
+      screen: "PassengerHome",
+      params: {
+        selectedField: field,
+        selectedPlace: selected,
+      },
+    });
   };
 
   useEffect(() => {

@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useRef, useMemo } from "react";
+import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ActivityIndicator,
   ScrollView,
+  Modal,
   Animated,
   Easing,
   Pressable,
@@ -12,23 +13,29 @@ import {
   Platform,
   PanResponder,
   Dimensions,
+  TextInput,
   Alert,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, Circle } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, RouteProp, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { getDriverLocationApi } from "../../tracking/api/trackingApi";
+import { getSocket } from "../../../services/socket";
 import type { PassengerStackParamList } from "../navigation/PassengerNavigator";
 import { useTheme } from "../../../app/providers/ThemeProvider";
-import { ENV } from "../../../config/env";
 import { radius, spacing, typography } from "../../../config/theme";
+import { TripTimeline } from "../../../components/common/TripTimeline";
+import { LiveRideStatusPanel } from "../../../components/common/LiveRideStatusPanel";
+import {
+  createReviewApi,
+  getMyReviewForRideApi,
+} from "../../reviews/api/reviewApi";
+import { createRideIncidentApi } from "../../safety/api/incidentApi";
 
 type LiveRideRouteProp = RouteProp<PassengerStackParamList, "LiveRide">;
 
-const POLL_INTERVAL_MS = 2000;
-const ALERT_SNOOZE_MS = 10 * 60 * 1000;
+const POLL_INTERVAL_MS = 20000;
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
@@ -72,18 +79,24 @@ export function LiveRideScreen() {
 
   const [driverLat, setDriverLat] = useState<number | null>(null);
   const [driverLng, setDriverLng] = useState<number | null>(null);
-  const [isDeviated, setIsDeviated] = useState(false);
-  const [distanceFromRoute, setDistanceFromRoute] = useState<number | null>(
-    null,
-  );
-  const [routeStatus, setRouteStatus] = useState<"on_route" | "deviated">(
-    "on_route",
-  );
-  const [alertHiddenUntil, setAlertHiddenUntil] = useState<number | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [remainingKm, setRemainingKm] = useState<number | null>(null);
   const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
+  const [rideStatus, setRideStatus] = useState<string | null>(null);
+  const [distanceToPickupKm, setDistanceToPickupKm] = useState<number | null>(
+    null,
+  );
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [completionPromptVisible, setCompletionPromptVisible] = useState(false);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewAlreadySubmitted, setReviewAlreadySubmitted] = useState(false);
+  const [sosModalVisible, setSosModalVisible] = useState(false);
+  const [sosSubmitting, setSosSubmitting] = useState(false);
+  const [sosMessage, setSosMessage] = useState("");
+  const completionPromptShownRef = useRef(false);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const animatedLat = useRef(new Animated.Value(pickupLat)).current;
@@ -100,6 +113,13 @@ export function LiveRideScreen() {
     lat: pickupLat,
     lng: pickupLng,
   });
+
+  const returnToPassengerHome = useCallback(() => {
+    (navigation as any).reset({
+      index: 0,
+      routes: [{ name: "PassengerTabs", params: { screen: "PassengerHome" } }],
+    });
+  }, [navigation]);
 
   const routeCoords = useMemo(() => {
     if (!encodedPolyline) return [];
@@ -125,6 +145,84 @@ export function LiveRideScreen() {
       return [];
     }
   }, [encodedPolyline]);
+
+  const syncDriverPoint = useCallback((
+    lat: number,
+    lng: number,
+    nextLastUpdate?: string | null,
+    nextStatus?: string | null,
+  ) => {
+    setDriverLat(lat);
+    setDriverLng(lng);
+    if (nextLastUpdate) {
+      setLastUpdate(nextLastUpdate);
+    }
+    if (nextStatus) {
+      setRideStatus(nextStatus);
+    }
+
+    if (meetupPoint) {
+      setDistanceToPickupKm(
+        haversineKm(lat, lng, meetupPoint.lat, meetupPoint.lng),
+      );
+    } else {
+      setDistanceToPickupKm(null);
+    }
+
+    const remaining = haversineKm(lat, lng, dropoffLat, dropoffLng);
+    setRemainingKm(remaining);
+    setEtaMinutes(estimateEtaMinutes(remaining));
+
+    if (!hasInitialDriverFix.current) {
+      animatedLat.setValue(lat);
+      animatedLng.setValue(lng);
+      setAnimatedDriver({ lat, lng });
+      hasInitialDriverFix.current = true;
+    } else {
+      Animated.parallel([
+        Animated.timing(animatedLat, {
+          toValue: lat,
+          duration: 1100,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: false,
+        }),
+        Animated.timing(animatedLng, {
+          toValue: lng,
+          duration: 1100,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: false,
+        }),
+      ]).start();
+    }
+
+    cameraMoveCounter.current += 1;
+
+    if (mapRef.current && cameraMoveCounter.current % 2 === 0) {
+      if (meetupPoint) {
+        mapRef.current.fitToCoordinates(
+          [
+            { latitude: lat, longitude: lng },
+            { latitude: meetupPoint.lat, longitude: meetupPoint.lng },
+          ],
+          {
+            edgePadding: { top: 160, right: 80, bottom: 280, left: 80 },
+            animated: true,
+          },
+        );
+      } else {
+        mapRef.current.animateCamera(
+      {
+            center: {
+              latitude: lat,
+              longitude: lng,
+            },
+            zoom: 15,
+          },
+          { duration: 900 },
+        );
+      }
+    }
+  }, [dropoffLat, dropoffLng, meetupPoint, animatedLat, animatedLng]);
 
   useEffect(() => {
     if (routeCoords.length > 0 && mapRef.current) {
@@ -180,58 +278,8 @@ export function LiveRideScreen() {
         const data = await getDriverLocationApi(rideId);
 
         if (data.lat != null && data.lng != null) {
-          setDriverLat(data.lat);
-          setDriverLng(data.lng);
-          setLastUpdate(data.lastUpdate);
-          setIsDeviated(data.isDeviated ?? false);
-          setDistanceFromRoute(data.distanceFromRoute ?? null);
-          setRouteStatus(data.routeStatus ?? (data.isDeviated ? "deviated" : "on_route"));
-
-          const remaining = haversineKm(
-            data.lat,
-            data.lng,
-            dropoffLat,
-            dropoffLng,
-          );
-          setRemainingKm(remaining);
-          setEtaMinutes(estimateEtaMinutes(remaining));
-
-          if (!hasInitialDriverFix.current) {
-            animatedLat.setValue(data.lat);
-            animatedLng.setValue(data.lng);
-            setAnimatedDriver({ lat: data.lat, lng: data.lng });
-            hasInitialDriverFix.current = true;
-          } else {
-            Animated.parallel([
-              Animated.timing(animatedLat, {
-                toValue: data.lat,
-                duration: 1100,
-                easing: Easing.out(Easing.quad),
-                useNativeDriver: false,
-              }),
-              Animated.timing(animatedLng, {
-                toValue: data.lng,
-                duration: 1100,
-                easing: Easing.out(Easing.quad),
-                useNativeDriver: false,
-              }),
-            ]).start();
-          }
-
-          cameraMoveCounter.current += 1;
-
-          if (mapRef.current && cameraMoveCounter.current % 2 === 0) {
-            mapRef.current.animateCamera(
-              {
-                center: {
-                  latitude: data.lat,
-                  longitude: data.lng,
-                },
-                zoom: 15,
-              },
-              { duration: 900 },
-            );
-          }
+          setRideStatus(data.status ?? null);
+          syncDriverPoint(data.lat, data.lng, data.lastUpdate, data.status);
         }
       } catch {
         // silent poll failure
@@ -241,85 +289,115 @@ export function LiveRideScreen() {
     };
 
     fetchLocation();
+    if (socketConnected) {
+      return;
+    }
+
     const timer = setInterval(fetchLocation, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [rideId, animatedLat, animatedLng]);
+  }, [rideId, syncDriverPoint, socketConnected]);
 
   useEffect(() => {
-    let cancelled = false;
+    const socket = getSocket();
+    if (!socket) {
+      setSocketConnected(false);
+      return;
+    }
 
-    const loadDismissState = async () => {
+    const syncConnection = () => setSocketConnected(Boolean(socket.connected));
+    const handleLocationUpdated = (payload: any) => {
+      if (payload?.rideId !== rideId || payload.lat == null || payload.lng == null) {
+        return;
+      }
+
+      syncDriverPoint(
+        Number(payload.lat),
+        Number(payload.lng),
+        payload.lastUpdate ?? null,
+        payload.status ?? null,
+      );
+      setLoading(false);
+    };
+
+    const handleStatusUpdated = (payload: any) => {
+      if (payload?.rideId !== rideId || !payload.status) {
+        return;
+      }
+
+      setRideStatus(payload.status);
+    };
+
+    syncConnection();
+    socket.emit("join_ride", rideId);
+    socket.on("connect", syncConnection);
+    socket.on("disconnect", syncConnection);
+    socket.on("ride_location_updated", handleLocationUpdated);
+    socket.on("ride_status_updated", handleStatusUpdated);
+    socket.on("ride_started", handleStatusUpdated);
+    socket.on("ride_completed", handleStatusUpdated);
+
+    return () => {
+      socket.emit("leave_ride", rideId);
+      socket.off("connect", syncConnection);
+      socket.off("disconnect", syncConnection);
+      socket.off("ride_location_updated", handleLocationUpdated);
+      socket.off("ride_status_updated", handleStatusUpdated);
+      socket.off("ride_started", handleStatusUpdated);
+      socket.off("ride_completed", handleStatusUpdated);
+    };
+  }, [rideId, syncDriverPoint]);
+
+  useEffect(() => {
+    if (rideStatus !== "completed") {
+      return;
+    }
+
+    if (completionPromptShownRef.current) {
+      return;
+    }
+
+    let active = true;
+    const checkReview = async () => {
       try {
-        const raw = await AsyncStorage.getItem(
-          `@travia.routeAlertDismissed.${rideId}`,
-        );
-        const parsed = raw ? Number(raw) : null;
+        const res = await getMyReviewForRideApi(rideId);
+        if (!active) return;
 
-        if (!cancelled && parsed && parsed > Date.now()) {
-          setAlertHiddenUntil(parsed);
-          return;
-        }
+        const alreadyReviewed = Boolean(res.review);
+        setReviewAlreadySubmitted(alreadyReviewed);
 
-        if (!cancelled) {
-          setAlertHiddenUntil(null);
+        if (!alreadyReviewed) {
+          completionPromptShownRef.current = true;
+          setCompletionPromptVisible(true);
         }
       } catch {
-        if (!cancelled) {
-          setAlertHiddenUntil(null);
-        }
+        if (!active) return;
+        completionPromptShownRef.current = true;
+        setCompletionPromptVisible(true);
       }
     };
 
-    loadDismissState();
+    checkReview();
 
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, [rideId]);
+  }, [rideStatus, rideId]);
 
-  useEffect(() => {
-    if (!alertHiddenUntil) {
-      return;
-    }
-
-    const delay = Math.max(alertHiddenUntil - Date.now(), 0);
-    const timer = setTimeout(() => {
-      setAlertHiddenUntil(null);
-    }, delay);
-
-    return () => clearTimeout(timer);
-  }, [alertHiddenUntil]);
-
-  const shouldShowDeviationAlert =
-    isDeviated && (!alertHiddenUntil || alertHiddenUntil <= Date.now());
-
-  const snoozeDeviationAlert = async () => {
-    const expiry = Date.now() + ALERT_SNOOZE_MS;
-    setAlertHiddenUntil(expiry);
-
+  const submitReview = async () => {
     try {
-      await AsyncStorage.setItem(
-        `@travia.routeAlertDismissed.${rideId}`,
-        String(expiry),
-      );
+      setReviewSubmitting(true);
+      await createReviewApi({
+        rideId,
+        rating: reviewRating,
+        comment: reviewComment.trim() || undefined,
+      });
+      setReviewAlreadySubmitted(true);
+      setCompletionPromptVisible(false);
+      returnToPassengerHome();
     } catch {
-      // silent
-    }
-  };
-
-  const contactAdmin = async () => {
-    if (!ENV.ADMIN_SUPPORT_PHONE) {
-      Alert.alert(
-        "Admin Contact",
-        "Admin support number is not configured yet.",
-      );
-      return;
-    }
-
-    try {
-      await Linking.openURL(`tel:${ENV.ADMIN_SUPPORT_PHONE}`);
-    } catch {
-      Alert.alert("Admin Contact", "Unable to open phone dialer.");
+      // keep modal open so the passenger can retry
+    } finally {
+      setReviewSubmitting(false);
     }
   };
 
@@ -388,12 +466,109 @@ export function LiveRideScreen() {
     }
   };
 
+  const openSOSModal = () => {
+    if (isCompleted) {
+      return;
+    }
+
+    setSosModalVisible(true);
+  };
+
+  const submitSOS = async () => {
+    if (sosSubmitting) {
+      return;
+    }
+
+    const trimmedMessage = sosMessage.trim();
+
+    if (!trimmedMessage) {
+      Alert.alert(
+        "Add a message",
+        "Please tell the admin what happened before sending SOS.",
+      );
+      return;
+    }
+
+    setSosSubmitting(true);
+
+    try {
+      await createRideIncidentApi({
+        rideId,
+        kind: "sos",
+        severity: "critical",
+        category: "ride_safety",
+        message: trimmedMessage,
+        locationLabel: meetupPoint?.label || "Live ride",
+        latitude: driverLat,
+        longitude: driverLng,
+      });
+
+      setSosModalVisible(false);
+      setSosMessage("");
+      Alert.alert(
+        "SOS sent",
+        "Your emergency alert has been sent to the admin team.",
+      );
+    } catch {
+      Alert.alert(
+        "SOS failed",
+        "We could not send the SOS alert. Please try again.",
+      );
+    } finally {
+      setSosSubmitting(false);
+    }
+  };
+
   const mapRegion = {
     latitude: pickupLat,
     longitude: pickupLng,
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   };
+
+  const isArrived =
+    distanceToPickupKm != null && distanceToPickupKm <= 0.25;
+  const isStarted = rideStatus === "in_progress";
+  const isCompleted = rideStatus === "completed";
+  const tripSteps = useMemo(
+    () => [
+      {
+        key: "accepted",
+        label: "Accepted",
+        description: "Your booking is confirmed.",
+        state: "complete" as const,
+      },
+      {
+        key: "driver_on_way",
+        label: "Driver on way",
+        description: "Tracking the driver live on the map.",
+        state: isCompleted || isStarted || isArrived ? ("complete" as const) : ("active" as const),
+      },
+      {
+        key: "arrived",
+        label: "Arrived",
+        description: isArrived
+          ? "Driver reached the pickup area."
+          : "Driver is approaching the pickup point.",
+        state: isCompleted || isStarted || isArrived ? ("complete" as const) : ("upcoming" as const),
+      },
+      {
+        key: "started",
+        label: "Started",
+        description: isStarted
+          ? "Trip is in progress."
+          : "Trip starts after pickup.",
+        state: isCompleted || isStarted ? ("complete" as const) : ("upcoming" as const),
+      },
+      {
+        key: "completed",
+        label: "Completed",
+        description: "Trip will appear in your history.",
+        state: isCompleted ? ("active" as const) : ("upcoming" as const),
+      },
+    ],
+    [isArrived, isStarted, isCompleted],
+  );
 
   const s = makeStyles(theme);
 
@@ -418,50 +593,6 @@ export function LiveRideScreen() {
         </Pressable>
       </View>
 
-      {shouldShowDeviationAlert && (
-        <View style={s.alertBanner}>
-        <View
-          style={[
-            s.alertIconWrap,
-          ]}
-        >
-          <Ionicons name="warning" size={18} color="#fff" />
-        </View>
-
-        <View style={s.alertBody}>
-          <View style={s.alertHeaderRow}>
-            <Text style={s.alertTitle}>Route deviation detected</Text>
-            <View style={s.statusChip}>
-              <Text style={s.statusChipText}>Action needed</Text>
-            </View>
-          </View>
-
-          <Text style={s.alertSubText}>
-            Driver is away from the planned path. You can contact admin now or
-            hide this alert for 10 minutes.
-          </Text>
-
-          <Text style={s.alertMeta}>
-            {distanceFromRoute != null
-              ? `${Math.round(distanceFromRoute)}m from route`
-              : routeStatus === "on_route"
-                ? "Within the 200m safety threshold"
-                : "Tracking live route status"}
-          </Text>
-
-          <View style={s.alertActions}>
-            <Pressable onPress={contactAdmin} style={s.alertPrimaryBtn}>
-              <Ionicons name="call-outline" size={16} color="#fff" />
-              <Text style={s.alertPrimaryBtnText}>Call Admin</Text>
-            </Pressable>
-            <Pressable onPress={snoozeDeviationAlert} style={s.alertGhostBtn}>
-              <Text style={s.alertGhostBtnText}>Hide 10 min</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-      )}
-
       <MapView
         ref={mapRef}
         style={s.map}
@@ -473,6 +604,18 @@ export function LiveRideScreen() {
             coordinates={routeCoords}
             strokeColor={theme.success}
             strokeWidth={5}
+          />
+        )}
+
+        {driverLat != null && driverLng != null && meetupPoint && (
+          <Polyline
+            coordinates={[
+              { latitude: animatedDriver.lat, longitude: animatedDriver.lng },
+              { latitude: meetupPoint.lat, longitude: meetupPoint.lng }
+            ]}
+            strokeColor={theme.primary}
+            strokeWidth={3}
+            lineDashPattern={[8, 8]}
           />
         )}
 
@@ -499,6 +642,15 @@ export function LiveRideScreen() {
             </View>
           </View>
         </Marker>
+
+        {meetupPoint && (
+          <Marker
+            coordinate={{ latitude: meetupPoint.lat, longitude: meetupPoint.lng }}
+            title="Your Pickup Point"
+            description={meetupPoint.address || "Driver is heading here"}
+            pinColor={theme.primary}
+          />
+        )}
 
         {driverLat != null && driverLng != null && (
           <>
@@ -598,24 +750,55 @@ export function LiveRideScreen() {
                       size={16}
                       color={theme.primary}
                     />
-                    <Text style={s.meetupTitle}>Meetup point</Text>
+                    <Text style={s.meetupTitle}>
+                      {meetupPoint.source === "passengerPickup"
+                        ? "Passenger pickup point"
+                        : "Meetup point"}
+                    </Text>
                   </View>
                   <Text style={s.meetupName}>{meetupPoint.label}</Text>
                   <Text style={s.meetupAddress}>
-                    {meetupPoint.address || "Shared pickup point"}
+                    {meetupPoint.address ||
+                      (meetupPoint.source === "passengerPickup"
+                        ? "Passenger pickup point"
+                        : "Shared pickup point")}
                   </Text>
                 </View>
               )}
 
-              <View style={s.driverInfo}>
-                <View style={s.driverIcon}>
-                  <Ionicons name="car-sport" size={20} color={theme.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.statusLabel}>Driver is on the way</Text>
-                  <Text style={s.statusSub}>Tracking live GPS position</Text>
-                </View>
-              </View>
+              <TripTimeline steps={tripSteps} theme={theme} />
+
+              <LiveRideStatusPanel
+                theme={theme}
+                iconName="car-sport"
+                iconColor={theme.primary}
+                title={
+                  isCompleted
+                    ? "Trip completed"
+                    : isStarted
+                      ? "Trip in progress"
+                      : isArrived
+                        ? "Driver arrived"
+                        : "Driver is on the way"
+                }
+                subtitle={
+                  isCompleted
+                    ? "This ride has ended."
+                    : isArrived
+                      ? "Driver is at the pickup point."
+                      : "Tracking live GPS position"
+                }
+                stats={[
+                  {
+                    value: remainingKm != null ? `${remainingKm.toFixed(1)} km` : "--",
+                    label: "Remaining",
+                  },
+                  {
+                    value: etaMinutes != null ? `${etaMinutes} min` : "--",
+                    label: "Approx ETA",
+                  },
+                ]}
+              />
 
               <View style={s.actionRow}>
                 <Pressable onPress={openInMaps} style={s.primaryActionBtn}>
@@ -636,39 +819,148 @@ export function LiveRideScreen() {
                     size={16}
                     color={theme.primary}
                   />
-                  <Text style={s.secondaryActionBtnText}>Call Driver</Text>
+                  <Text style={s.secondaryActionBtnText}>Call</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => (navigation as any).navigate("Chat", { rideId })}
+                  style={s.secondaryActionBtn}
+                >
+                  <Ionicons name="chatbubble-outline" size={16} color={theme.primary} />
+                  <Text style={s.secondaryActionBtnText}>Chat</Text>
                 </Pressable>
               </View>
 
-              <View style={s.tripStatsRow}>
-                <View style={s.tripStatCard}>
-                  <Ionicons
-                    name="navigate-outline"
-                    size={16}
-                    color={theme.primary}
-                  />
-                  <Text style={s.tripStatValue}>
-                    {remainingKm != null ? `${remainingKm.toFixed(1)} km` : "--"}
-                  </Text>
-                  <Text style={s.tripStatLabel}>Remaining</Text>
-                </View>
+              {!isCompleted && (
+                <Pressable onPress={openSOSModal} style={s.sosActionBtn}>
+                  <Ionicons name="warning-outline" size={18} color="#fff" />
+                  <Text style={s.sosActionBtnText}>Send SOS Alert</Text>
+                </Pressable>
+              )}
 
-                <View style={s.tripStatCard}>
-                  <Ionicons
-                    name="time-outline"
-                    size={16}
-                    color={theme.primary}
-                  />
-                  <Text style={s.tripStatValue}>
-                    {etaMinutes != null ? `${etaMinutes} min` : "--"}
-                  </Text>
-                  <Text style={s.tripStatLabel}>Approx ETA</Text>
-                </View>
-              </View>
             </>
           )}
         </ScrollView>
       </Animated.View>
+
+      <Modal
+        visible={completionPromptVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCompletionPromptVisible(false)}
+      >
+        <View style={s.reviewModalOverlay}>
+          <View style={s.reviewModalCard}>
+            <View style={s.reviewIconWrap}>
+              <Ionicons name="checkmark-done-circle" size={34} color={theme.success} />
+            </View>
+            <Text style={s.reviewModalTitle}>Ride completed</Text>
+            <Text style={s.reviewModalSubtitle}>
+              Your ride has ended. Please leave a review for the driver.
+            </Text>
+
+            <View style={s.reviewStarsRow}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <Pressable
+                  key={star}
+                  onPress={() => setReviewRating(star)}
+                  style={s.reviewStarButton}
+                >
+                  <Ionicons
+                    name={star <= reviewRating ? "star" : "star-outline"}
+                    size={28}
+                    color={theme.amber}
+                  />
+                </Pressable>
+              ))}
+            </View>
+
+            <TextInput
+              value={reviewComment}
+              onChangeText={setReviewComment}
+              placeholder="Write a quick review (optional)"
+              placeholderTextColor={theme.textSecondary}
+              multiline
+              style={s.reviewCommentInput}
+            />
+
+            <View style={s.reviewModalActions}>
+              <Pressable
+                onPress={returnToPassengerHome}
+                style={s.reviewSecondaryBtn}
+              >
+                <Text style={s.reviewSecondaryBtnText}>Maybe later</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={submitReview}
+                disabled={reviewSubmitting}
+                style={s.reviewPrimaryBtn}
+              >
+                {reviewSubmitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={s.reviewPrimaryBtnText}>Leave review</Text>
+                )}
+              </Pressable>
+            </View>
+
+            {reviewAlreadySubmitted ? (
+              <Text style={s.reviewAlreadyText}>You already submitted a review for this ride.</Text>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={sosModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSosModalVisible(false)}
+      >
+        <View style={s.reviewModalOverlay}>
+          <View style={s.reviewModalCard}>
+            <View style={s.reviewIconWrap}>
+              <Ionicons name="warning" size={34} color={theme.danger} />
+            </View>
+            <Text style={s.reviewModalTitle}>Send SOS alert?</Text>
+            <Text style={s.reviewModalSubtitle}>
+              Describe the problem so the admin team can act quickly with your
+              live ride details and current location.
+            </Text>
+
+            <TextInput
+              value={sosMessage}
+              onChangeText={setSosMessage}
+              placeholder="Example: Driver is not following the route and I feel unsafe."
+              placeholderTextColor={theme.textSecondary}
+              multiline
+              style={s.reviewCommentInput}
+            />
+
+            <View style={s.reviewModalActions}>
+              <Pressable
+                onPress={() => setSosModalVisible(false)}
+                style={s.reviewSecondaryBtn}
+                disabled={sosSubmitting}
+              >
+                <Text style={s.reviewSecondaryBtnText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={submitSOS}
+                style={[s.reviewPrimaryBtn, { backgroundColor: theme.danger }]}
+                disabled={sosSubmitting}
+              >
+                <Text style={s.reviewPrimaryBtnText}>
+                  {sosSubmitting ? "Sending..." : "Send SOS"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -724,112 +1016,6 @@ function makeStyles(theme: any) {
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: theme.primarySubtle,
-    },
-
-    alertBanner: {
-      backgroundColor: theme.danger,
-      paddingVertical: spacing.md,
-      paddingHorizontal: spacing.md,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
-      position: "absolute",
-      top: 115,
-      left: 20,
-      right: 20,
-      borderRadius: radius.xl,
-      zIndex: 10,
-      shadowColor: "#000",
-      shadowOpacity: 0.2,
-      shadowRadius: 10,
-      elevation: 5,
-    },
-    alertIconWrap: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: "rgba(255,255,255,0.16)",
-    },
-    safeIconWrap: {
-      backgroundColor: theme.successBg,
-    },
-    alertBody: {
-      flex: 1,
-      gap: 4,
-    },
-    alertHeaderRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 10,
-    },
-    alertTitle: {
-      color: "#fff",
-      ...typography.bodySemiBold,
-      flex: 1,
-    },
-    statusChip: {
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 999,
-      backgroundColor: "rgba(255,255,255,0.16)",
-    },
-    statusChipSafe: {
-      backgroundColor: theme.successSubtle,
-    },
-    statusChipText: {
-      color: "#fff",
-      ...typography.captionMedium,
-      fontWeight: "700",
-    },
-    alertText: { color: "#fff", ...typography.bodyMedium },
-    alertSubText: {
-      color: "rgba(255,255,255,0.9)",
-      ...typography.caption,
-    },
-    alertMeta: {
-      color: "rgba(255,255,255,0.85)",
-      ...typography.caption,
-      fontWeight: "600",
-    },
-    safeBanner: {
-      backgroundColor: theme.surface,
-      borderWidth: 1,
-      borderColor: theme.success + "33",
-      shadowOpacity: 0.08,
-    },
-    alertActions: {
-      flexDirection: "row",
-      gap: 10,
-      marginTop: 8,
-    },
-    alertPrimaryBtn: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 8,
-      borderRadius: 999,
-      backgroundColor: "rgba(255,255,255,0.16)",
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-    },
-    alertPrimaryBtnText: {
-      color: "#fff",
-      ...typography.captionMedium,
-      fontWeight: "700",
-    },
-    alertGhostBtn: {
-      borderRadius: 999,
-      backgroundColor: "rgba(255,255,255,0.10)",
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-    },
-    alertGhostBtnText: {
-      color: "#fff",
-      ...typography.captionMedium,
-      fontWeight: "700",
     },
 
     drawerCard: {
@@ -923,22 +1109,6 @@ function makeStyles(theme: any) {
     emptyState: { alignItems: "center", paddingVertical: 10, gap: 8 },
     waitingText: { ...typography.bodyMedium, color: theme.textMuted },
 
-    driverInfo: { flexDirection: "row", alignItems: "center", gap: 14 },
-    driverIcon: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: theme.primarySubtle,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    statusLabel: { ...typography.bodyMedium, color: theme.textPrimary },
-    statusSub: {
-      ...typography.captionMedium,
-      color: theme.textSecondary,
-      marginTop: 2,
-    },
-
     actionRow: {
       flexDirection: "row",
       gap: spacing.sm,
@@ -975,7 +1145,20 @@ function makeStyles(theme: any) {
       ...typography.bodySemiBold,
       color: theme.primary,
     },
-
+    sosActionBtn: {
+      minHeight: 48,
+      borderRadius: radius.lg,
+      backgroundColor: theme.danger,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      marginTop: spacing.sm,
+    },
+    sosActionBtnText: {
+      ...typography.bodySemiBold,
+      color: "#fff",
+    },
     openMapsBtn: {
       marginTop: spacing.lg,
       backgroundColor: theme.primary,
@@ -1028,29 +1211,96 @@ function makeStyles(theme: any) {
       borderWidth: 2,
       borderColor: "#fff",
     },
-    tripStatsRow: {
+    reviewModalOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(15, 23, 42, 0.55)",
+      justifyContent: "center",
+      padding: spacing.xl,
+    },
+    reviewModalCard: {
+      backgroundColor: theme.surface,
+      borderRadius: radius.xl,
+      padding: spacing.xl,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    reviewIconWrap: {
+      alignItems: "center",
+      marginBottom: spacing.sm,
+    },
+    reviewModalTitle: {
+      ...typography.h3,
+      color: theme.textPrimary,
+      textAlign: "center",
+    },
+    reviewModalSubtitle: {
+      ...typography.bodyMedium,
+      color: theme.textSecondary,
+      textAlign: "center",
+      marginTop: spacing.xs,
+      marginBottom: spacing.lg,
+    },
+    reviewStarsRow: {
+      flexDirection: "row",
+      justifyContent: "center",
+      marginBottom: spacing.md,
+    },
+    reviewStarButton: {
+      marginHorizontal: 4,
+    },
+    reviewCommentInput: {
+      minHeight: 96,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: radius.lg,
+      backgroundColor: theme.surfaceElevated,
+      color: theme.textPrimary,
+      padding: spacing.md,
+      textAlignVertical: "top",
+    },
+    sosHint: {
+      ...typography.caption,
+      color: theme.textSecondary,
+      textAlign: "center",
+      marginTop: -spacing.sm,
+      marginBottom: spacing.sm,
+    },
+    reviewModalActions: {
       flexDirection: "row",
       gap: spacing.sm,
       marginTop: spacing.lg,
     },
-    tripStatCard: {
+    reviewSecondaryBtn: {
       flex: 1,
-      backgroundColor: theme.surfaceElevated,
+      minHeight: 46,
       borderRadius: radius.lg,
-      paddingVertical: spacing.md,
-      paddingHorizontal: spacing.md,
-      alignItems: "center",
       borderWidth: 1,
       borderColor: theme.border,
-      gap: 4,
+      backgroundColor: theme.surfaceElevated,
+      alignItems: "center",
+      justifyContent: "center",
     },
-    tripStatValue: {
+    reviewSecondaryBtnText: {
       ...typography.bodySemiBold,
-      color: theme.textPrimary,
-    },
-    tripStatLabel: {
-      ...typography.caption,
       color: theme.textSecondary,
+    },
+    reviewPrimaryBtn: {
+      flex: 1,
+      minHeight: 46,
+      borderRadius: radius.lg,
+      backgroundColor: theme.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    reviewPrimaryBtnText: {
+      ...typography.bodySemiBold,
+      color: "#fff",
+    },
+    reviewAlreadyText: {
+      ...typography.captionMedium,
+      color: theme.textSecondary,
+      textAlign: "center",
+      marginTop: spacing.md,
     },
   });
 }

@@ -8,9 +8,6 @@ export const updateLocationApi = async (
 ): Promise<{
   lat: number;
   lng: number;
-  isDeviated: boolean;
-  distanceFromRoute: number | null;
-  routeStatus?: "on_route" | "deviated";
 }> => {
   return apiClient(`/api/rides/${rideId}/location`, {
     method: "PATCH",
@@ -26,9 +23,6 @@ export const getDriverLocationApi = async (
   lng: number | null;
   lastUpdate: string | null;
   status: string;
-  isDeviated?: boolean;
-  distanceFromRoute?: number | null;
-  routeStatus?: "on_route" | "deviated";
 }> => {
   return apiClient(`/api/rides/${rideId}/location`);
 };

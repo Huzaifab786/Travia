@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { fetchAdminRides, fetchAdminRideDetail } from "@/lib/admin-rides";
 import { fetchAdminRideLiveLocation } from "@/lib/admin-live";
 import type {
@@ -42,6 +43,7 @@ function buildMapUrl(lat: number | null, lng: number | null) {
 }
 
 export default function LiveTrackingPage() {
+  const searchParams = useSearchParams();
   const [rides, setRides] = useState<AdminRide[]>([]);
   const [status, setStatus] = useState<PageStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -53,9 +55,6 @@ export default function LiveTrackingPage() {
     lat: number | null;
     lng: number | null;
     lastUpdate: string | null;
-    isDeviated?: boolean;
-    distanceFromRoute?: number | null;
-    routeStatus?: "on_route" | "deviated";
   } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -88,13 +87,23 @@ export default function LiveTrackingPage() {
     }
 
     loadLiveRides();
-    const timer = setInterval(loadLiveRides, 10000);
+    const timer = setInterval(loadLiveRides, 30000);
 
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
   }, [selectedRideId]);
+
+  useEffect(() => {
+    const rideId = searchParams.get("rideId");
+
+    if (!rideId) {
+      return;
+    }
+
+    setSelectedRideId(rideId);
+  }, [searchParams]);
 
   useEffect(() => {
     const rideId = selectedRideId as string | null;
@@ -141,7 +150,7 @@ export default function LiveTrackingPage() {
     }
 
     loadRideDetails();
-    const timer = setInterval(loadRideDetails, 5000);
+    const timer = setInterval(loadRideDetails, 20000);
 
     return () => {
       cancelled = true;
@@ -165,9 +174,6 @@ export default function LiveTrackingPage() {
     liveLocation?.lng ?? selectedRide?.currentLng ?? selectedRide?.pickupLng ?? null,
   );
 
-  const selectedRideStatus = liveLocation?.routeStatus || "on_route";
-  const isDeviated = liveLocation?.isDeviated ?? false;
-
   return (
     <div className="space-y-6">
       <section className="overflow-hidden rounded-4xl border border-white/70 bg-white/80 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.10)] backdrop-blur sm:p-8">
@@ -181,8 +187,8 @@ export default function LiveTrackingPage() {
                 Track any active ride in real time.
               </h1>
               <p className="max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
-                Watch the driver move live, inspect deviation status, and reach
-                the driver or passenger instantly if intervention is needed.
+                Watch the driver move live and reach the driver or passenger
+                instantly if intervention is needed.
               </p>
             </div>
           </div>
@@ -195,7 +201,7 @@ export default function LiveTrackingPage() {
               {rides.length}
             </p>
             <p className="mt-1 text-xs text-slate-600">
-              Updated every 10 seconds
+              Updated every 30 seconds
             </p>
           </div>
         </div>
@@ -321,9 +327,6 @@ export default function LiveTrackingPage() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full border border-rose-200 bg-rose-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">
-                      {isDeviated ? "Deviation" : "On route"}
-                    </span>
                     <span
                       className={`rounded-full border px-3 py-1 text-xs font-semibold capitalize ${getStatusClasses(
                         selectedRide.status,
@@ -346,13 +349,9 @@ export default function LiveTrackingPage() {
                     Live status
                   </p>
                   <p className="mt-1 text-lg font-semibold text-slate-900">
-                    {selectedRideStatus === "deviated" ? "Route deviated" : "Everything looks fine"}
+                    Live position only
                   </p>
-                  <p className="text-sm text-slate-500">
-                    {liveLocation?.distanceFromRoute != null
-                      ? `${Math.round(liveLocation.distanceFromRoute)}m from route`
-                      : "Tracking live position"}
-                  </p>
+                  <p className="text-sm text-slate-500">Tracking live position</p>
                 </div>
               </div>
 
@@ -454,9 +453,8 @@ export default function LiveTrackingPage() {
                       Monitoring note
                     </p>
                     <p className="mt-2 text-sm leading-6 text-slate-600">
-                      If the ride deviates, admin can call the driver or passenger
-                      immediately from here, then use the Drivers panel to review
-                      or suspend the account if needed.
+                      Use the contact buttons to coordinate with the driver or
+                      passenger while the ride is live.
                     </p>
                   </div>
                 </div>

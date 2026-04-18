@@ -16,7 +16,7 @@ export type DriverBookingRequest = {
   passengerPickup?: PlaceSuggestion | null;
   passengerDropoff?: PlaceSuggestion | null;
   pricingQuote?: BookingQuote | null;
-  status: "pending" | "accepted" | "rejected" | "cancelled";
+  status: "pending" | "accepted" | "rejected" | "cancelled" | "picked_up" | "dropped_off";
   createdAt: string;
   passenger: {
     name: string;
@@ -44,7 +44,7 @@ export const getDriverRequestsApi = () => {
   );
 };
 
-export const updateBookingStatusApi = (bookingId: string, action: "accept" | "reject") => {
+export const updateBookingStatusApi = (bookingId: string, action: "accept" | "reject" | "pickup" | "dropoff") => {
   return apiClient<{ booking: DriverBookingRequest }>(`/api/bookings/${bookingId}`, {
     method: "PATCH",
     body: JSON.stringify({ action }),

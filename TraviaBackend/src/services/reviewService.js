@@ -31,12 +31,16 @@ const createPassengerReview = async (passengerId, rideId, rating, comment) => {
       where: {
         rideId,
         passengerId,
-        status: "accepted",
+        status: {
+          in: ["accepted", "picked_up", "dropped_off"],
+        },
       },
     });
 
     if (!booking) {
-      const err = new Error("Only passengers with accepted bookings can review this ride");
+      const err = new Error(
+        "Only passengers who completed this ride can review it",
+      );
       err.statusCode = 403;
       throw err;
     }

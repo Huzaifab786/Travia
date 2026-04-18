@@ -35,6 +35,7 @@ import { Ride } from "../../passenger/api/rideApi";
 import { Ionicons } from "@expo/vector-icons";
 import { getMyVehicleApi, Vehicle } from "../api/vehicleApi";
 import { useTheme } from "../../../app/providers/ThemeProvider";
+import { useNotifications } from "../../../app/providers/NotificationProvider";
 import { radius, spacing, typography } from "../../../config/theme";
 import { Skeleton } from "../../../components/common/Skeleton";
 
@@ -45,6 +46,7 @@ export function DriverHomeScreen() {
   const { user } = useContext(AuthContext);
   const navigation =
     useNavigation<NativeStackNavigationProp<DriverStackParamList>>();
+  const { unreadCount } = useNotifications();
 
   const [requests, setRequests] = useState<DriverBookingRequest[]>([]);
   const [myRides, setMyRides] = useState<Ride[]>([]);
@@ -200,6 +202,17 @@ export function DriverHomeScreen() {
             </Text>
             <Text style={s.headerTitle}>Driver Dashboard</Text>
           </View>
+          <Pressable
+            style={s.iconBg}
+            onPress={() => navigation.navigate("Notifications")}
+          >
+            <Ionicons
+              name="notifications-outline"
+              size={20}
+              color={theme.primary}
+            />
+            {unreadCount > 0 ? <View style={s.badge} /> : null}
+          </Pressable>
         </View>
 
         <View style={s.statsRow}>
@@ -616,6 +629,11 @@ export function DriverHomeScreen() {
                       <Pressable
                         onPress={() => {
                           const acceptedBooking = (ride as any).acceptedBookings?.[0];
+                          const pickupPoint =
+                            acceptedBooking?.passengerPickup ||
+                            acceptedBooking?.meetupPoint ||
+                            null;
+
                           navigation.navigate("DriverLiveRide", {
                             rideId: ride.id,
                             pickupLat: ride.pickup.lat,
@@ -625,7 +643,13 @@ export function DriverHomeScreen() {
                             encodedPolyline: (ride as any).encodedPolyline,
                             passengerName: acceptedBooking?.passenger?.name || null,
                             passengerPhone: acceptedBooking?.passenger?.phone || null,
-                            meetupPoint: acceptedBooking?.meetupPoint || null,
+                            meetupPoint: pickupPoint
+                              ? {
+                                  ...pickupPoint,
+                                  source: "passengerPickup",
+                                }
+                              : null,
+                            passengerDropoff: acceptedBooking?.passengerDropoff || null,
                           });
                         }}
                         style={s.broadcastBtn}
@@ -645,6 +669,11 @@ export function DriverHomeScreen() {
                       <Pressable
                         onPress={() => {
                           const acceptedBooking = (ride as any).acceptedBookings?.[0];
+                          const pickupPoint =
+                            acceptedBooking?.passengerPickup ||
+                            acceptedBooking?.meetupPoint ||
+                            null;
+
                           navigation.navigate("DriverLiveRide", {
                             rideId: ride.id,
                             pickupLat: ride.pickup.lat,
@@ -654,7 +683,12 @@ export function DriverHomeScreen() {
                             encodedPolyline: (ride as any).encodedPolyline,
                             passengerName: acceptedBooking?.passenger?.name || null,
                             passengerPhone: acceptedBooking?.passenger?.phone || null,
-                            meetupPoint: acceptedBooking?.meetupPoint || null,
+                            meetupPoint: pickupPoint
+                              ? {
+                                  ...pickupPoint,
+                                  source: "passengerPickup",
+                                }
+                              : null,
                           });
                         }}
                         style={s.broadcastBtn}
@@ -753,6 +787,28 @@ function makeStyles(theme: any) {
       marginBottom: 2,
     },
     headerTitle: { ...typography.h2, color: theme.textPrimary },
+    iconBg: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceElevated,
+      justifyContent: "center",
+      alignItems: "center",
+      position: "relative",
+    },
+    badge: {
+      position: "absolute",
+      top: 7,
+      right: 7,
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: theme.danger,
+      borderWidth: 1.5,
+      borderColor: theme.surfaceElevated,
+    },
     statsRow: {
       flexDirection: "row",
       paddingHorizontal: spacing.lg,

@@ -1,5 +1,6 @@
 const prisma = require("../config/db");
 const supabaseAdmin = require("../config/supabaseAdmin");
+const { getIo } = require("../socket");
 const { extractDocumentWithGemini } = require("./geminiOcrService");
 
 const REQUIRED_DOCUMENTS = {
@@ -664,8 +665,18 @@ async function reviewDriverVerification(adminId, driverId, action, reason) {
       data: {
         driverStatus: action === "approve" ? "verified" : "suspended",
         driverRejectionReason: action === "approve" ? null : reason || null,
+        accountStatus: action === "approve" ? "active" : "suspended",
+        accountSuspensionReason: action === "approve" ? null : reason || null,
+        accountSuspendedAt: action === "approve" ? null : new Date(),
+        accountSuspendedByAdminId: action === "approve" ? null : adminId,
       },
     });
+
+    try {
+      getIo().in(`user_${driverId}`).disconnectSockets();
+    } catch {
+      // Socket server may not be available in some tests.
+    }
 
     return verification;
   });

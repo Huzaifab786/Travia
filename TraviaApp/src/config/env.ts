@@ -1,5 +1,5 @@
 export const ENV = {
-  API_BASE_URL: "http://10.96.47.126:5000",
+  API_BASE_URL: "http://192.168.100.26:5000",
   ADMIN_SUPPORT_PHONE: "+923001234567",
   // TODO: Replace these with your actual Supabase project keys
   SUPABASE_URL: "https://hkkmpifbckyhvpalkkwe.supabase.co",

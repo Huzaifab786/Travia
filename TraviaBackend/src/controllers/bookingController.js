@@ -1,4 +1,6 @@
 const bookingService = require("../services/bookingService");
+const { getIo } = require("../socket");
+const { emitUserNotification } = require("../services/notificationService");
 
 const createBooking = async (req, res) => {
   const {
@@ -30,6 +32,21 @@ const createBooking = async (req, res) => {
       passengerDropoff,
     },
   );
+
+  try {
+    emitUserNotification({
+      userId: booking.ride.driverId,
+      title: "New booking request",
+      body: `${booking.passenger?.name || "A passenger"} requested ${booking.seatsRequested} seat(s).`,
+      type: "booking_request",
+      data: {
+        rideId: booking.rideId,
+        bookingId: booking.id,
+      },
+    });
+  } catch (e) {
+    console.error("Notification error", e);
+  }
 
   return res.status(201).json({ booking });
 };
@@ -75,6 +92,53 @@ const updateBookingStatus = async (req, res) => {
   }
 
   const booking = await bookingService.updateBookingStatus(req.user.id, id, action);
+
+  try {
+    getIo().to(`ride_${booking.rideId}`).emit("booking_update", booking);
+    getIo().to(`ride_${booking.rideId}`).emit("ride_status_updated", {
+      rideId: booking.rideId,
+      status: booking.ride.status,
+      bookingStatus: booking.status,
+    });
+
+    if (booking.passenger?.id) {
+      const notificationTitle =
+        booking.status === "accepted"
+          ? "Your booking was accepted"
+          : booking.status === "rejected"
+            ? "Your booking was declined"
+            : booking.status === "picked_up"
+              ? "Driver picked you up"
+              : booking.status === "dropped_off"
+                ? "Ride completed"
+                : "Booking updated";
+
+      const notificationBody =
+        booking.status === "accepted"
+          ? `${booking.ride?.driver?.name || "The driver"} accepted your booking.`
+          : booking.status === "rejected"
+            ? `${booking.ride?.driver?.name || "The driver"} declined your booking.`
+            : booking.status === "picked_up"
+              ? "Your driver marked the ride as picked up."
+              : booking.status === "dropped_off"
+                ? "Your trip has been completed."
+                : "Your booking status changed.";
+
+      emitUserNotification({
+        userId: booking.passenger.id,
+        title: notificationTitle,
+        body: notificationBody,
+        type: "booking_status",
+        data: {
+          rideId: booking.rideId,
+          bookingId: booking.id,
+          status: booking.status,
+        },
+      });
+    }
+  } catch (e) {
+    console.error("Socket error", e);
+  }
 
   return res.status(200).json({ booking });
 };

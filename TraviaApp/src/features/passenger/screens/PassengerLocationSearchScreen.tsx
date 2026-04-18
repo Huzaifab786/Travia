@@ -36,7 +36,8 @@ export function PassengerLocationSearchScreen() {
   const navigation = useNavigation<PassengerLocationSearchNavProp>();
   const route = useRoute<PassengerLocationSearchRouteProp>();
 
-  const { title, field, focusLat, focusLng, initialQuery } = route.params;
+  const { title, field, focusLat, focusLng, initialQuery, returnTo, ride } =
+    route.params;
 
   const [query, setQuery] = useState(initialQuery || "");
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
@@ -72,15 +73,35 @@ export function PassengerLocationSearchScreen() {
   }, [query, focusLat, focusLng]);
 
   const handleSelect = (place: PlaceSuggestion) => {
-    navigation.dispatch(
-      StackActions.popTo("PassengerTabs", {
-        screen: "PassengerHome",
-        params: {
+    if (returnTo === "RideDetails") {
+      if (!ride) {
+        navigation.navigate("PassengerTabs", {
+          screen: "PassengerHome",
+          params: {
+            selectedField: field,
+            selectedPlace: place,
+          },
+        });
+        return;
+      }
+
+      navigation.dispatch(
+        StackActions.popTo("RideDetails", {
+          ride,
           selectedField: field,
           selectedPlace: place,
-        },
-      }),
-    );
+        }),
+      );
+      return;
+    }
+
+    navigation.navigate("PassengerTabs", {
+      screen: "PassengerHome",
+      params: {
+        selectedField: field,
+        selectedPlace: place,
+      },
+    });
   };
 
   const navigateToMap = () => {
@@ -101,6 +122,8 @@ export function PassengerLocationSearchScreen() {
     navigation.navigate("PassengerMapPicker", {
       field,
       initialLocation,
+      ride,
+      returnTo,
     });
   };
 

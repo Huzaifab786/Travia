@@ -9,6 +9,7 @@ import {
   Alert,
   TextInput,
   ActivityIndicator,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,6 +19,7 @@ import { radius, spacing, typography } from "../../../config/theme";
 import { supabase } from "../../../config/supabaseClient";
 import { syncUserApi } from "../api/authApi";
 import type { UserGender } from "../types/auth";
+import { createRideIncidentApi } from "../../safety/api/incidentApi";
 
 export function ProfileScreen() {
   const { theme, isDark, toggleTheme } = useTheme();
@@ -27,6 +29,12 @@ export function ProfileScreen() {
   const [name, setName] = useState(user?.user_metadata?.full_name ?? "User");
   const [gender, setGender] = useState<UserGender | "">(user?.user_metadata?.gender ?? "");
   const [saving, setSaving] = useState(false);
+  const [feedbackModalVisible, setFeedbackModalVisible] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackCategory, setFeedbackCategory] = useState<
+    "app_feedback" | "ride_issue" | "suggestion" | "other"
+  >("app_feedback");
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
   useEffect(() => {
     setName(user?.user_metadata?.full_name ?? "User");
@@ -85,6 +93,47 @@ export function ProfileScreen() {
       Alert.alert("Error", e?.message || "Failed to update profile");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openFeedback = () => setFeedbackModalVisible(true);
+  const closeFeedback = () => {
+    setFeedbackModalVisible(false);
+    setFeedbackMessage("");
+    setFeedbackCategory("app_feedback");
+  };
+
+  const submitFeedback = async () => {
+    const trimmedMessage = feedbackMessage.trim();
+
+    if (!trimmedMessage) {
+      Alert.alert(
+        "Add a message",
+        "Please write what went wrong or what you want to improve.",
+      );
+      return;
+    }
+
+    setFeedbackSubmitting(true);
+
+    try {
+      await createRideIncidentApi({
+        kind: "report",
+        severity: "low",
+        category: feedbackCategory,
+        message: trimmedMessage,
+        locationLabel: `${role ?? "user"} profile`,
+      });
+
+      closeFeedback();
+      Alert.alert(
+        "Feedback sent",
+        "Thanks for sharing. The admin team can review it from the Safety Center.",
+      );
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Failed to send feedback");
+    } finally {
+      setFeedbackSubmitting(false);
     }
   };
 
@@ -233,8 +282,96 @@ export function ProfileScreen() {
           </Pressable>
         </View>
 
+        <Text style={s.sectionLabel}>FEEDBACK</Text>
+        <View style={s.card}>
+          <Pressable style={s.feedbackRow} onPress={openFeedback}>
+            <View style={[s.settingIcon, { backgroundColor: theme.primarySubtle }]}>
+              <Ionicons name="megaphone-outline" size={18} color={theme.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.settingLabel}>Report issue / send feedback</Text>
+              <Text style={s.feedbackCaption}>
+                Tell us what to improve in the app or a ride experience.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </Pressable>
+        </View>
+
         <Text style={s.footer}>Travia v1.0.0 - FYP Project</Text>
       </ScrollView>
+
+      <Modal
+        visible={feedbackModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeFeedback}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.modalCard}>
+            <View style={s.modalIconWrap}>
+              <Ionicons name="megaphone" size={34} color={theme.primary} />
+            </View>
+            <Text style={s.modalTitle}>Report issue / send feedback</Text>
+            <Text style={s.modalSubtitle}>
+              Share app problems, ride concerns, or suggestions so we can improve Travia.
+            </Text>
+
+            <View style={s.categoryRow}>
+              {[
+                { key: "app_feedback", label: "App issue" },
+                { key: "ride_issue", label: "Ride issue" },
+                { key: "suggestion", label: "Suggestion" },
+                { key: "other", label: "Other" },
+              ].map((item) => {
+                const active = feedbackCategory === item.key;
+                return (
+                  <Pressable
+                    key={item.key}
+                    onPress={() => setFeedbackCategory(item.key as typeof feedbackCategory)}
+                    style={[s.categoryChip, active && s.categoryChipActive]}
+                  >
+                    <Text style={[s.categoryChipText, active && s.categoryChipTextActive]}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <TextInput
+              value={feedbackMessage}
+              onChangeText={setFeedbackMessage}
+              placeholder="Write your feedback here..."
+              placeholderTextColor={theme.textSecondary}
+              multiline
+              style={s.feedbackInput}
+            />
+
+            <View style={s.modalActions}>
+              <Pressable
+                onPress={closeFeedback}
+                style={s.secondaryModalBtn}
+                disabled={feedbackSubmitting}
+              >
+                <Text style={s.secondaryModalBtnText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={submitFeedback}
+                style={s.primaryModalBtn}
+                disabled={feedbackSubmitting}
+              >
+                {feedbackSubmitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={s.primaryModalBtnText}>Send</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -420,6 +557,17 @@ function makeStyles(theme: any) {
       justifyContent: "space-between",
       paddingVertical: 14,
     },
+    feedbackRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingVertical: 14,
+      gap: 12,
+    },
+    feedbackCaption: {
+      ...typography.caption,
+      color: theme.textMuted,
+      marginTop: 2,
+    },
     settingLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
     settingIcon: {
       width: 36,
@@ -436,6 +584,102 @@ function makeStyles(theme: any) {
       gap: 12,
     },
     dangerText: { ...typography.bodyMedium, color: theme.danger },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(15, 23, 42, 0.55)",
+      justifyContent: "center",
+      padding: spacing.xl,
+    },
+    modalCard: {
+      backgroundColor: theme.surface,
+      borderRadius: radius.xl,
+      padding: spacing.xl,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    modalIconWrap: {
+      alignItems: "center",
+      marginBottom: spacing.sm,
+    },
+    modalTitle: {
+      ...typography.h3,
+      color: theme.textPrimary,
+      textAlign: "center",
+    },
+    modalSubtitle: {
+      ...typography.bodyMedium,
+      color: theme.textSecondary,
+      textAlign: "center",
+      marginTop: spacing.xs,
+      marginBottom: spacing.lg,
+    },
+    categoryRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+      marginBottom: spacing.md,
+    },
+    categoryChip: {
+      borderRadius: radius.full,
+      borderWidth: 1,
+      borderColor: theme.border,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      backgroundColor: theme.surfaceElevated,
+    },
+    categoryChipActive: {
+      backgroundColor: theme.primarySubtle,
+      borderColor: theme.primary,
+    },
+    categoryChipText: {
+      color: theme.textSecondary,
+      fontSize: 12,
+      fontWeight: "600",
+    },
+    categoryChipTextActive: {
+      color: theme.primary,
+    },
+    feedbackInput: {
+      minHeight: 110,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: radius.lg,
+      backgroundColor: theme.surfaceElevated,
+      color: theme.textPrimary,
+      padding: spacing.md,
+      textAlignVertical: "top",
+    },
+    modalActions: {
+      flexDirection: "row",
+      gap: spacing.sm,
+      marginTop: spacing.lg,
+    },
+    secondaryModalBtn: {
+      flex: 1,
+      minHeight: 46,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceElevated,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    secondaryModalBtnText: {
+      ...typography.bodySemiBold,
+      color: theme.textSecondary,
+    },
+    primaryModalBtn: {
+      flex: 1,
+      minHeight: 46,
+      borderRadius: radius.lg,
+      backgroundColor: theme.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    primaryModalBtnText: {
+      ...typography.bodySemiBold,
+      color: "#fff",
+    },
     footer: {
       textAlign: "center",
       ...typography.caption,

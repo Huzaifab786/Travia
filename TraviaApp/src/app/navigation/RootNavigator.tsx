@@ -1,7 +1,8 @@
-import React, { useContext, useState } from "react";
+import React, { useContext, useState, useEffect } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { View, ActivityIndicator, Text } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { AuthNavigator } from "../../features/auth/navigation/AuthNavigator";
 import { AuthContext } from "../providers/AuthProvider";
@@ -10,6 +11,7 @@ import { DriverNavigator } from "../../features/driver/navigation/DriverNavigato
 import { OnboardingScreen } from "../../features/onboarding/screens/OnboardingScreen";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../providers/ThemeProvider";
+import { SuspendedAccountScreen } from "../../features/auth/screens/SuspendedAccountScreen";
 
 export type RootStackParamList = {
   Onboarding: undefined;
@@ -50,15 +52,34 @@ function BrandedLoader() {
 }
 
 export function RootNavigator() {
-  const { token, role, loading: authLoading } = useContext(AuthContext);
-  const [showOnboarding, setShowOnboarding] = useState(true);
+  const { token, role, loading: authLoading, suspendedAccount } = useContext(AuthContext);
+  const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      try {
+        const hasSeen = await AsyncStorage.getItem("hasSeenOnboarding");
+        setShowOnboarding(hasSeen !== "true");
+      } catch (error) {
+        setShowOnboarding(true);
+      }
+    };
+    checkOnboarding();
+  }, []);
 
   const OnboardingScreenWrapper = () => (
-    <OnboardingScreen onDone={() => setShowOnboarding(false)} />
+    <OnboardingScreen onDone={async () => {
+      await AsyncStorage.setItem("hasSeenOnboarding", "true");
+      setShowOnboarding(false);
+    }} />
   );
 
-  if (authLoading) {
+  if (authLoading || showOnboarding === null) {
     return <BrandedLoader />;
+  }
+
+  if (suspendedAccount) {
+    return <SuspendedAccountScreen />;
   }
 
   return (

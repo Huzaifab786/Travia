@@ -11,6 +11,7 @@ import { NavigatorScreenParams, CompositeScreenProps } from "@react-navigation/n
 import { PassengerHomeScreen } from "../screens/PassengerHomeScreen";
 import { RideDetailsScreen } from "../screens/RideDetailsScreen";
 import { LiveRideScreen } from "../screens/LiveRideScreen";
+import { PassengerPassesScreen } from "../screens/PassengerPassesScreen";
 import { MyBookingsScreen } from "../../bookings/screens/MyBookingsScreen";
 import { PassengerLocationSearchScreen } from "../screens/PassengerLocationSearchScreen";
 import { PassengerMapPickerScreen } from "../screens/PassengerMapPickerScreen";
@@ -19,6 +20,10 @@ import type { PlaceSuggestion } from "../../driver/api/placeApi";
 import { Ionicons } from "@expo/vector-icons";
 import { ProfileScreen } from "../../auth/screens/ProfileScreen";
 import { ThemeContext } from "../../../app/providers/ThemeProvider";
+import { ChatScreen } from "../../shared/screens/ChatScreen";
+import { NotificationsScreen } from "../../shared/screens/NotificationsScreen";
+
+type PassengerReturnRoute = "PassengerHome" | "RideDetails";
 
 export type PassengerTabParamList = {
   PassengerHome: {
@@ -26,12 +31,17 @@ export type PassengerTabParamList = {
     selectedField?: "pickup" | "dropoff";
   } | undefined;
   MyBookings: undefined;
+  CommuterPasses: undefined;
   Profile: undefined;
 };
 
 export type PassengerStackParamList = {
   PassengerTabs: NavigatorScreenParams<PassengerTabParamList>;
-  RideDetails: { ride: Ride };
+  RideDetails: {
+    ride: Ride;
+    selectedPlace?: PlaceSuggestion;
+    selectedField?: "pickup" | "dropoff";
+  };
   LiveRide: {
     rideId: string;
     pickupLat: number;
@@ -56,11 +66,17 @@ export type PassengerStackParamList = {
     focusLat?: number;
     focusLng?: number;
     initialQuery?: string;
+    ride?: Ride;
+    returnTo?: PassengerReturnRoute;
   };
   PassengerMapPicker: {
     field: "pickup" | "dropoff";
     initialLocation?: { lat: number; lng: number };
+    ride?: Ride;
+    returnTo?: PassengerReturnRoute;
   };
+  Chat: { rideId: string };
+  Notifications: undefined;
 };
 
 const Stack = createNativeStackNavigator<PassengerStackParamList>();
@@ -111,6 +127,16 @@ function PassengerTabNavigator() {
         }}
       />
       <Tab.Screen
+        name="CommuterPasses"
+        component={PassengerPassesScreen}
+        options={{
+          title: "Passes",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="card-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
         name="Profile"
         component={ProfileScreen}
         options={{
@@ -150,6 +176,16 @@ export function PassengerNavigator() {
       <Stack.Screen
         name="LiveRide"
         component={LiveRideScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={ChatScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={NotificationsScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

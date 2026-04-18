@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const prisma = require("../config/db");
+const { setCachedUserSnapshot } = require("../cache/userSnapshotCache");
 
 const protect = async (req, res, next) => {
   try {
@@ -12,13 +13,14 @@ const protect = async (req, res, next) => {
     const token = authHeader.split(" ")[1];
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
       select: {
         id: true,
         role: true,
         gender: true,
+        accountStatus: true,
+        accountSuspensionReason: true,
       },
     });
 
@@ -26,11 +28,17 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ message: "User no longer exists" });
     }
 
-    req.user = {
-      id: user.id,
-      role: user.role,
-      gender: user.gender,
-    };
+    if (user.accountStatus === "suspended") {
+      return res.status(403).json({
+        message:
+          "Your account has been suspended" +
+          (user.accountSuspensionReason
+            ? `: ${user.accountSuspensionReason}`
+            : ". Please contact support."),
+      });
+    }
+
+    req.user = setCachedUserSnapshot(user);
 
     next();
   } catch (err) {
@@ -48,22 +56,23 @@ const optionalProtect = async (req, _res, next) => {
 
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
       select: {
         id: true,
         role: true,
         gender: true,
+        accountStatus: true,
+        accountSuspensionReason: true,
       },
     });
 
     if (user) {
-      req.user = {
-        id: user.id,
-        role: user.role,
-        gender: user.gender,
-      };
+      if (user.accountStatus === "suspended") {
+        return next();
+      }
+
+      req.user = setCachedUserSnapshot(user);
     }
 
     return next();

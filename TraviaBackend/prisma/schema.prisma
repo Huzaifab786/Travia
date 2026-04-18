@@ -15,6 +15,10 @@ model User {
   phone                 String?              @unique
   gender                Gender?
   role                  Role                 @default(passenger)
+  accountStatus         AccountStatus        @default(active)
+  accountSuspensionReason String?
+  accountSuspendedAt    DateTime?
+  accountSuspendedByAdminId String?
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   supabaseId            String?              @unique
@@ -25,9 +29,19 @@ model User {
   driverDocuments       DriverDocument[]
   driverVerification    DriverVerification?
   driverVerificationsReviewed DriverVerification[] @relation("DriverVerificationReviewedBy")
+  accountSuspendedByAdmin   User?              @relation("AccountSuspendedByAdmin", fields: [accountSuspendedByAdminId], references: [id])
+  accountsSuspended        User[]              @relation("AccountSuspendedByAdmin")
+  passengerPasses       CommuterPass[]       @relation("PassengerPasses")
+  driverPasses          CommuterPass[]       @relation("DriverPasses")
+  accountAppeals        AccountAppeal[]      @relation("AccountAppeals")
+  accountAppealsReviewed AccountAppeal[]     @relation("AccountAppealsReviewedBy")
   reviewsGot            Review[]             @relation("ReviewsReceived")
   reviewsGiven          Review[]             @relation("ReviewsGiven")
   rides                 Ride[]               @relation("DriverRides")
+  incidentsReported     RideIncident[]       @relation("IncidentsReportedBy")
+  incidentsReportedAgainst RideIncident[]     @relation("IncidentsReportedAgainst")
+  incidentsResolved     RideIncident[]       @relation("IncidentsResolvedBy")
+  messages              Message[]
   vehicle               Vehicle?
 }
 
@@ -81,6 +95,8 @@ model Ride {
   meetupPoints    Json?
   bookings        Booking[]
   reviews         Review[]
+  messages        Message[]
+  incidents       RideIncident[]
   driver          User       @relation("DriverRides", fields: [driverId], references: [id])
 
   @@index([driverId])
@@ -126,6 +142,50 @@ model Review {
   @@unique([rideId, reviewerId, revieweeId])
 }
 
+model Message {
+  id        String   @id @default(cuid())
+  rideId    String
+  senderId  String
+  content   String
+  createdAt DateTime @default(now())
+
+  ride      Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([rideId])
+  @@index([senderId])
+}
+
+model RideIncident {
+  id                 String             @id @default(cuid())
+  rideId             String?
+  reporterId         String
+  reportedUserId     String?
+  resolvedByAdminId  String?
+  kind               RideIncidentKind    @default(report)
+  category           String?
+  severity           RideIncidentSeverity @default(medium)
+  status             RideIncidentStatus  @default(open)
+  message            String
+  locationLabel      String?
+  latitude           Float?
+  longitude          Float?
+  adminNotes         String?
+  resolvedAt         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  ride               Ride?              @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  reporter           User               @relation("IncidentsReportedBy", fields: [reporterId], references: [id])
+  reportedUser       User?              @relation("IncidentsReportedAgainst", fields: [reportedUserId], references: [id])
+  resolvedByAdmin    User?              @relation("IncidentsResolvedBy", fields: [resolvedByAdminId], references: [id])
+
+  @@index([rideId])
+  @@index([reporterId])
+  @@index([reportedUserId])
+  @@index([kind, status])
+}
+
 model DriverDocument {
   id            String              @id @default(cuid())
   userId        String
@@ -162,6 +222,61 @@ model DriverVerification {
   user              User                @relation(fields: [userId], references: [id])
   reviewedByAdmin   User?               @relation("DriverVerificationReviewedBy", fields: [reviewedByAdminId], references: [id])
   documents         DriverDocument[]
+}
+
+model CommuterPass {
+  id              String             @id @default(cuid())
+  passengerId     String
+  driverId        String
+  status          PassStatus         @default(pending) 
+  planType        String?
+  durationDays    Int?
+  startDate       DateTime?
+  endDate         DateTime?
+  routeSignature  String?
+  routePickup     Json?
+  routeDropoff    Json?
+  totalRides      Int                
+  ridesUsed       Int                @default(0)
+  price           Float              
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  passenger       User               @relation("PassengerPasses", fields: [passengerId], references: [id])
+  driver          User               @relation("DriverPasses", fields: [driverId], references: [id])
+
+  @@index([passengerId])
+  @@index([driverId])
+  @@index([passengerId, driverId, routeSignature, status])
+}
+
+model AccountAppeal {
+  id                String               @id @default(cuid())
+  userId            String?
+  email             String
+  name              String?
+  role              Role?
+  message           String
+  status            AccountAppealStatus  @default(pending)
+  adminNotes        String?
+  reviewedByAdminId String?
+  reviewedAt        DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  user              User?                @relation("AccountAppeals", fields: [userId], references: [id], onDelete: SetNull)
+  reviewedByAdmin   User?                @relation("AccountAppealsReviewedBy", fields: [reviewedByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([email])
+  @@index([status, createdAt])
+}
+
+enum PassStatus {
+  pending
+  active
+  exhausted
+  cancelled
 }
 
 enum DriverDocumentStatus {
@@ -201,6 +316,11 @@ enum Role {
   admin
 }
 
+enum AccountStatus {
+  active
+  suspended
+}
+
 enum Gender {
   male
   female
@@ -220,4 +340,31 @@ enum BookingStatus {
   accepted
   rejected
   cancelled
+  picked_up
+  dropped_off
+}
+
+enum RideIncidentKind {
+  sos
+  report
+}
+
+enum RideIncidentStatus {
+  open
+  acknowledged
+  resolved
+  closed
+}
+
+enum RideIncidentSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+enum AccountAppealStatus {
+  pending
+  approved
+  rejected
 }

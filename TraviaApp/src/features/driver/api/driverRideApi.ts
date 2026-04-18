@@ -11,6 +11,12 @@ export const completeRideApi = (rideId: string) => {
   });
 };
 
+export const startRideApi = (rideId: string) => {
+  return apiClient<{ ride: Ride }>(`/api/rides/${rideId}/start`, {
+    method: "PATCH",
+  });
+};
+
 export const deleteRideApi = (rideId: string) => {
   return apiClient<{ deleted: boolean; rideId: string }>(`/api/rides/${rideId}`, {
     method: "DELETE",

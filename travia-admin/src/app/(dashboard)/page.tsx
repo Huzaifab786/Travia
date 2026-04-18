@@ -15,6 +15,12 @@ type StatsResponse = {
   totalRides: number;
   pendingVerifications: number;
   totalBookings: number;
+  suspendedUsers: number;
+  pendingAppeals: number;
+  openIncidents: number;
+  openSafetyAlerts: number;
+  openReports: number;
+  criticalIncidents: number;
 };
 
 type Status = "loading" | "ready" | "error";
@@ -41,9 +47,24 @@ const statCards = [
     description: "Drivers waiting for admin approval.",
   },
   {
+    key: "suspendedUsers",
+    label: "Suspended users",
+    description: "Accounts currently blocked by admin action.",
+  },
+  {
+    key: "pendingAppeals",
+    label: "Account appeals",
+    description: "Unblock requests waiting for admin review.",
+  },
+  {
     key: "totalBookings",
     label: "Bookings",
     description: "All booking records stored in the backend.",
+  },
+  {
+    key: "openIncidents",
+    label: "Open incidents",
+    description: "All unresolved safety items and user reports.",
   },
 ] as const;
 
@@ -190,7 +211,7 @@ export default function Home() {
       </section>
 
       {status === "loading" && (
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {statCards.map((card) => (
             <div
               key={card.key}
@@ -213,7 +234,7 @@ export default function Home() {
       )}
 
       {status === "ready" && (
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {summary.map((card) => (
             <article
               key={card.key}
@@ -228,6 +249,40 @@ export default function Home() {
               </p>
             </article>
           ))}
+        </section>
+      )}
+
+      {status === "ready" && stats && (
+        <section className="grid gap-4 sm:grid-cols-3">
+          <article className="rounded-3xl border border-rose-200/80 bg-white/90 p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">Open safety alerts</p>
+            <p className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">
+              {formatCount(stats.openSafetyAlerts)}
+            </p>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Passenger SOS alerts waiting for admin review.
+            </p>
+          </article>
+
+          <article className="rounded-3xl border border-sky-200/80 bg-white/90 p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">Open reports</p>
+            <p className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">
+              {formatCount(stats.openReports)}
+            </p>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Passenger and driver reports that still need investigation.
+            </p>
+          </article>
+
+          <article className="rounded-3xl border border-violet-200/80 bg-white/90 p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">Pending appeals</p>
+            <p className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">
+              {formatCount(stats.pendingAppeals)}
+            </p>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Suspended users asking admin to review and restore access.
+            </p>
+          </article>
         </section>
       )}
     </div>

@@ -10,7 +10,11 @@ const placeRoutes = require("./routes/placeRoutes");
 const driverRoutes = require("./routes/driverRoutes");
 const pricingRoutes = require("./routes/pricingRoutes");
 const adminRoutes = require("./routes/adminRoutes");
-const reviewRoutes = require("./routes/reviewRoutes")
+const incidentRoutes = require("./routes/incidentRoutes");
+const reviewRoutes = require("./routes/reviewRoutes");
+const chatRoutes = require("./routes/chatRoutes");
+const passRoutes = require("./routes/passRoutes");
+const supportRoutes = require("./routes/supportRoutes");
 
 
 const app = express();
@@ -36,9 +40,12 @@ app.use("/api/routes", routeRoutes);
 app.use("/api/places", placeRoutes);
 app.use("/api/pricing", pricingRoutes);
 app.use("/api/admin",  adminRoutes);
+app.use("/api/incidents", incidentRoutes);
 
-app.use("/api/reviews", reviewRoutes)
-
+app.use("/api/reviews", reviewRoutes);
+app.use("/api/rides", chatRoutes);
+app.use("/api/passes", passRoutes);
+app.use("/api/support", supportRoutes);
 
 /** ✅ Global error handler (MUST be last) */
 app.use((err, req, res, next) => {

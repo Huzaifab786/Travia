@@ -7,21 +7,51 @@ const {
 const DEFAULT_FUEL_PRICE = 270;
 const MINIMUM_FARE = 20;
 
-async function getPricingSettings() {
-  let settings = await prisma.pricingSetting.findFirst({
-    orderBy: { createdAt: "asc" },
-  });
+let cachedPricingSettings = null;
+let pricingSettingsPromise = null;
 
-  if (!settings) {
-    settings = await prisma.pricingSetting.create({
-      data: {
-        fuelPricePerLitre: DEFAULT_FUEL_PRICE,
-        routeRadiusKm: 5,
-      },
-    });
+function cachePricingSettings(settings) {
+  cachedPricingSettings = settings ? { ...settings } : null;
+  return cachedPricingSettings;
+}
+
+async function getPricingSettings() {
+  if (cachedPricingSettings) {
+    return cachedPricingSettings;
   }
 
-  return settings;
+  if (pricingSettingsPromise) {
+    return pricingSettingsPromise;
+  }
+
+  pricingSettingsPromise = (async () => {
+    let settings = await prisma.pricingSetting.findFirst({
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (!settings) {
+      settings = await prisma.pricingSetting.create({
+        data: {
+          fuelPricePerLitre: DEFAULT_FUEL_PRICE,
+          routeRadiusKm: 15,
+        },
+      });
+    } else if (settings.routeRadiusKm <= 5) {
+      // Auto-upgrade from old default of 5km to 15km
+      settings = await prisma.pricingSetting.update({
+        where: { id: settings.id },
+        data: { routeRadiusKm: 15 },
+      });
+    }
+
+    return cachePricingSettings(settings);
+  })();
+
+  try {
+    return await pricingSettingsPromise;
+  } finally {
+    pricingSettingsPromise = null;
+  }
 }
 
 async function updatePricingSettings(data) {
@@ -37,9 +67,9 @@ async function updatePricingSettings(data) {
   if (
     !Number.isFinite(routeRadiusKm) ||
     routeRadiusKm < 2 ||
-    routeRadiusKm > 5
+    routeRadiusKm > 30
   ) {
-    const err = new Error("Route radius must be between 2 and 5 km");
+    const err = new Error("Route radius must be between 2 and 30 km");
     err.statusCode = 400;
     throw err;
   }
@@ -49,21 +79,25 @@ async function updatePricingSettings(data) {
   });
 
   if (!existing) {
-    return prisma.pricingSetting.create({
+    const settings = await prisma.pricingSetting.create({
       data: {
         fuelPricePerLitre,
         routeRadiusKm,
       },
     });
+
+    return cachePricingSettings(settings);
   }
 
-  return prisma.pricingSetting.update({
+  const settings = await prisma.pricingSetting.update({
     where: { id: existing.id },
     data: {
       fuelPricePerLitre,
       routeRadiusKm,
     },
   });
+
+  return cachePricingSettings(settings);
 }
 
 function calculateSharedFare({
@@ -109,6 +143,8 @@ function calculateSharedFare({
 function buildPassengerTripQuote({
   ridePolyline,
   rideDistanceMeters,
+  driverPickup,
+  driverDropoff,
   passengerPickup,
   passengerDropoff,
   seatsTotal,
@@ -138,9 +174,9 @@ function buildPassengerTripQuote({
 
   const driverPolyline =
     fallbackPolyline || [
-      passengerPickup?.driverPickup || null,
-      passengerDropoff?.driverDropoff || null,
-    ].filter(Boolean);
+      driverPickup || null,
+      driverDropoff || null,
+    ].filter(p => p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)));
 
   const polyline =
     Array.isArray(driverPolyline) && driverPolyline.length >= 2

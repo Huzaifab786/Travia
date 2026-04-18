@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { apiBaseUrl, readAdminToken } from "@/lib/admin-auth";
+import { restoreAdminUser, suspendAdminUser } from "@/lib/admin-users";
 
 type User = {
   id: string;
@@ -10,6 +11,9 @@ type User = {
   phone: string | null;
   role: string;
   driverStatus: string | null;
+  accountStatus: string;
+  accountSuspensionReason: string | null;
+  accountSuspendedAt: string | null;
   createdAt: string;
 };
 
@@ -47,11 +51,20 @@ function getStatusBadge(status: string | null) {
   return "bg-slate-100 text-slate-500 border border-slate-200";
 }
 
+function getAccountBadge(status: string) {
+  if (status === "suspended") {
+    return "bg-rose-100 text-rose-700 border border-rose-200";
+  }
+
+  return "bg-emerald-100 text-emerald-700 border border-emerald-200";
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadUsers() {
@@ -101,6 +114,72 @@ export default function UsersPage() {
   const totalAdmins = users.filter((user) => user.role === "admin").length;
   const totalDrivers = users.filter((user) => user.role === "driver").length;
   const totalPassengers = users.filter((user) => user.role === "passenger").length;
+  const suspendedUsers = users.filter((user) => user.accountStatus === "suspended").length;
+
+  const handleSuspend = async (user: User) => {
+    const reason = window.prompt(
+      `Suspend ${user.name || user.email}?\n\nEnter a reason for the suspension:`,
+      "Violation of platform rules",
+    );
+
+    if (reason === null) {
+      return;
+    }
+
+    setActionLoadingId(user.id);
+
+    try {
+      await suspendAdminUser(user.id, reason.trim());
+      setUsers((prev) =>
+        prev.map((item) =>
+          item.id === user.id
+            ? {
+                ...item,
+                accountStatus: "suspended",
+                accountSuspensionReason: reason.trim() || "Suspended by admin",
+                accountSuspendedAt: new Date().toISOString(),
+              }
+            : item,
+        ),
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleRestore = async (user: User) => {
+    const confirm = window.confirm(
+      `Restore ${user.name || user.email}?\n\nThis will reactivate the account.`,
+    );
+
+    if (!confirm) {
+      return;
+    }
+
+    setActionLoadingId(user.id);
+
+    try {
+      await restoreAdminUser(user.id);
+      setUsers((prev) =>
+        prev.map((item) =>
+          item.id === user.id
+            ? {
+                ...item,
+                accountStatus: "active",
+                accountSuspensionReason: null,
+                accountSuspendedAt: null,
+              }
+            : item,
+        ),
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -143,6 +222,12 @@ export default function UsersPage() {
                 Passengers
               </p>
               <p className="mt-2 text-2xl font-bold text-slate-900">{totalPassengers}</p>
+            </div>
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
+                Suspended
+              </p>
+              <p className="mt-2 text-2xl font-bold text-rose-900">{suspendedUsers}</p>
             </div>
           </div>
         </div>
@@ -200,8 +285,10 @@ export default function UsersPage() {
                     <th className="px-5 py-4 font-semibold">Email</th>
                     <th className="px-5 py-4 font-semibold">Phone</th>
                     <th className="px-5 py-4 font-semibold">Role</th>
-                    <th className="px-5 py-4 font-semibold">Status</th>
+                    <th className="px-5 py-4 font-semibold">Driver Status</th>
+                    <th className="px-5 py-4 font-semibold">Account</th>
                     <th className="px-5 py-4 font-semibold">Created</th>
+                    <th className="px-5 py-4 font-semibold">Actions</th>
                   </tr>
                 </thead>
 
@@ -242,8 +329,49 @@ export default function UsersPage() {
                         </span>
                       </td>
 
+                      <td className="px-5 py-4">
+                        <div className="space-y-2">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold capitalize ${getAccountBadge(
+                              user.accountStatus,
+                            )}`}
+                          >
+                            {user.accountStatus}
+                          </span>
+                          {user.accountSuspensionReason ? (
+                            <p className="max-w-xs text-xs leading-5 text-slate-500">
+                              {user.accountSuspensionReason}
+                            </p>
+                          ) : null}
+                        </div>
+                      </td>
+
                       <td className="px-5 py-4 text-slate-600">
                         {new Date(user.createdAt).toLocaleDateString()}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          {actionLoadingId === user.id ? (
+                            <span className="text-xs text-slate-500">Working...</span>
+                          ) : user.accountStatus === "suspended" ? (
+                            <button
+                              type="button"
+                              onClick={() => handleRestore(user)}
+                              className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                            >
+                              Restore
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleSuspend(user)}
+                              className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                            >
+                              Suspend
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

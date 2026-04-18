@@ -72,7 +72,7 @@ export type Ride = {
   }>;
   fareBreakdown?: {
     distanceKm: number;
-    avgKmPerLitre: number;
+    fuelAverage: number;
     fuelPricePerLitre: number;
     totalFuelCost: number;
     totalTravelers: number;

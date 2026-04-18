@@ -126,7 +126,7 @@ export default function LoginPage() {
                 autoComplete="email"
                 required
                 className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200"
-                placeholder="admin@travia.com"
+                placeholder="admin@travia.app"
               />
             </label>
 

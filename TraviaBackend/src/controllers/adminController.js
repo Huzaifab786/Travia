@@ -97,9 +97,77 @@ const getAllUsers = async (req, res, next) => {
   }
 };
 
+const suspendUser = async (req, res, next) => {
+  try {
+    const { reason } = req.body;
+    const data = await adminService.suspendUser(req.user.id, req.params.id, reason);
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const restoreUser = async (req, res, next) => {
+  try {
+    const data = await adminService.restoreUser(req.user.id, req.params.id);
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
 const getRideDetail = async (req, res, next) => {
   try {
     const data = await adminService.getRideDetail(req.params.id);
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getIncidents = async (req, res, next) => {
+  try {
+    const data = await adminService.getIncidents({
+      kind: req.query.kind,
+      status: req.query.status,
+    });
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getAppeals = async (req, res, next) => {
+  try {
+    const data = await adminService.getAppeals({
+      status: req.query.status,
+    });
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const updateAppeal = async (req, res, next) => {
+  try {
+    const data = await adminService.updateAppeal(
+      req.user.id,
+      req.params.id,
+      req.body,
+    );
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const updateIncident = async (req, res, next) => {
+  try {
+    const data = await adminService.updateIncident(
+      req.user.id,
+      req.params.id,
+      req.body,
+    );
     res.json(data);
   } catch (err) {
     next(err);
@@ -137,7 +205,13 @@ module.exports = {
   rejectDriver,
   getAllRides,
   getAllUsers,
+  suspendUser,
+  restoreUser,
   getRideDetail,
+  getIncidents,
+  getAppeals,
+  updateAppeal,
+  updateIncident,
   getPricingSettings,
   updatePricingSettings,
 };

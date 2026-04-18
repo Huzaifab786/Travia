@@ -5,9 +5,6 @@ export type AdminRideLiveLocation = {
   lng: number | null;
   lastUpdate: string | null;
   status: string;
-  isDeviated?: boolean;
-  distanceFromRoute?: number | null;
-  routeStatus?: "on_route" | "deviated";
 };
 
 export async function fetchAdminRideLiveLocation(rideId: string) {

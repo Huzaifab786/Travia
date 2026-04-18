@@ -21,10 +21,17 @@ import {
   cancelMyBookingApi,
   deleteBookingApi,
 } from "../api/myBookingsApi";
+import {
+  getEligibleDrivers,
+  getPassengerPasses,
+  EligiblePassOffer,
+} from "../../shared/api/passApi";
 import { createReviewApi } from "../../reviews/api/reviewApi";
 import type { PassengerStackParamList } from "../../passenger/navigation/PassengerNavigator";
 import { useTheme } from "../../../app/providers/ThemeProvider";
 import { radius, spacing, typography } from "../../../config/theme";
+import { PassEligibilityBanner } from "../../shared/components/PassEligibilityBanner";
+import { getSocket } from "../../../services/socket";
 
 export function MyBookingsScreen() {
   const { theme } = useTheme();
@@ -44,32 +51,88 @@ export function MyBookingsScreen() {
     useState<PassengerBooking | null>(null);
   const [selectedRating, setSelectedRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
+  const [eligibleDrivers, setEligibleDrivers] = useState<EligiblePassOffer[]>([]);
+  const [socketConnected, setSocketConnected] = useState(false);
 
-  const loadBookings = async () => {
+  const loadBookings = useCallback(async () => {
     try {
       setError("");
-      const res = await getMyBookingsApi();
-      setBookings(res.bookings);
+      const bookingsRes = await getMyBookingsApi();
+      setBookings(bookingsRes.bookings);
+      try {
+        const [passRes, eligibleRes] = await Promise.all([
+          getPassengerPasses(),
+          getEligibleDrivers(),
+        ]);
+        const filteredDrivers = eligibleRes.filter((d) => {
+          const existing = passRes.find(
+            (p) =>
+              p.driverId === d.driver.id &&
+              p.routeSignature === d.routeSignature &&
+              (p.status === "pending" || p.status === "active"),
+          );
+          return !existing;
+        });
+        setEligibleDrivers(filteredDrivers);
+      } catch {
+        setEligibleDrivers([]);
+      }
     } catch (e: any) {
       setError(e.message || "Failed to load bookings");
+      setEligibleDrivers([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadBookings();
-    }, []),
+    }, [loadBookings]),
   );
 
   useEffect(() => {
+    const socket = getSocket();
+    if (!socket) {
+      setSocketConnected(false);
+      return;
+    }
+
+    const refreshFromSocket = () => {
+      loadBookings();
+    };
+
+    const syncConnection = () => setSocketConnected(Boolean(socket.connected));
+
+    syncConnection();
+    socket.on("connect", syncConnection);
+    socket.on("disconnect", syncConnection);
+    socket.on("booking_update", refreshFromSocket);
+    socket.on("ride_status_updated", refreshFromSocket);
+    socket.on("ride_started", refreshFromSocket);
+    socket.on("ride_completed", refreshFromSocket);
+
+    return () => {
+      socket.off("connect", syncConnection);
+      socket.off("disconnect", syncConnection);
+      socket.off("booking_update", refreshFromSocket);
+      socket.off("ride_status_updated", refreshFromSocket);
+      socket.off("ride_started", refreshFromSocket);
+      socket.off("ride_completed", refreshFromSocket);
+    };
+  }, [loadBookings]);
+
+  useEffect(() => {
+    if (socketConnected) {
+      return;
+    }
+
     const interval = setInterval(() => {
       loadBookings();
-    }, 5000); //every 5 seconds
+    }, 120000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [socketConnected, loadBookings]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -121,6 +184,12 @@ export function MyBookingsScreen() {
   };
 
   const onTrackLive = (booking: PassengerBooking) => {
+    const pickupPoint =
+      booking.passengerPickup ||
+      booking.meetupPoint ||
+      booking.ride.meetupPoints?.[0] ||
+      null;
+
     navigation.navigate("LiveRide", {
       rideId: booking.ride.id,
       pickupLat: booking.ride.pickup.lat,
@@ -129,7 +198,12 @@ export function MyBookingsScreen() {
       dropoffLng: booking.ride.dropoff.lng,
       encodedPolyline: booking.ride.encodedPolyline || null,
       driverPhone: booking.ride.driver.phone || null,
-      meetupPoint: booking.meetupPoint || booking.ride.meetupPoints?.[0] || null,
+      meetupPoint: pickupPoint
+        ? {
+            ...pickupPoint,
+            source: "passengerPickup",
+          }
+        : null,
     });
   };
 
@@ -201,6 +275,17 @@ export function MyBookingsScreen() {
 
   return (
     <SafeAreaView style={s.container}>
+      {eligibleDrivers.length > 0 ? (
+        <PassEligibilityBanner
+          eligibleDrivers={eligibleDrivers}
+          onPress={() =>
+            navigation.navigate("PassengerTabs", {
+              screen: "CommuterPasses",
+            })
+          }
+        />
+      ) : null}
+
       <View style={s.header}>
         <Text style={s.title}>My Bookings</Text>
       </View>
@@ -355,13 +440,39 @@ export function MyBookingsScreen() {
                 </Pressable>
               )}
               {hasReviewed && (
-                <View style={s.reviewedBox}>
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={18}
-                    color={theme.success}
-                  />
-                  <Text style={s.reviewedText}>Review submitted</Text>
+                <View style={s.reviewSummaryBox}>
+                  <View style={s.reviewedBox}>
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={18}
+                      color={theme.success}
+                    />
+                    <Text style={s.reviewedText}>Review submitted</Text>
+                  </View>
+
+                  {item.review ? (
+                    <View style={s.reviewDetailBox}>
+                      <View style={s.reviewStarsRow}>
+                        {Array.from({ length: 5 }).map((_, index) => (
+                          <Ionicons
+                            key={index}
+                            name={
+                              index < item.review!.rating
+                                ? "star"
+                                : "star-outline"
+                            }
+                            size={14}
+                            color={theme.amber}
+                          />
+                        ))}
+                      </View>
+                      <Text style={s.reviewCommentText}>
+                        {item.review.comment?.trim()
+                          ? item.review.comment.trim()
+                          : "No written comment added."}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               )}
 
@@ -410,6 +521,17 @@ export function MyBookingsScreen() {
                 </Pressable>
               ))}
             </View>
+            <Text style={s.ratingHintText}>
+              {selectedRating === 1
+                ? "Poor"
+                : selectedRating === 2
+                  ? "Fair"
+                  : selectedRating === 3
+                    ? "Good"
+                    : selectedRating === 4
+                      ? "Great"
+                      : "Excellent"}
+            </Text>
 
             <TextInput
               value={reviewComment}
@@ -652,6 +774,12 @@ function makeStyles(theme: any) {
       justifyContent: "center",
       marginBottom: spacing.lg,
     },
+    ratingHintText: {
+      ...typography.captionMedium,
+      color: theme.textSecondary,
+      textAlign: "center",
+      marginBottom: spacing.sm,
+    },
     starBtn: {
       marginHorizontal: 4,
     },
@@ -696,20 +824,38 @@ function makeStyles(theme: any) {
       color: "#fff",
       fontWeight: "700",
     },
+    reviewSummaryBox: {
+      gap: spacing.sm,
+    },
     reviewedBox: {
-  marginTop: spacing.lg,
-  backgroundColor: theme.successBg,
-  borderRadius: radius.md,
-  paddingVertical: spacing.md,
-  alignItems: "center",
-  justifyContent: "center",
-  flexDirection: "row",
-  gap: 8,
-},
-reviewedText: {
-  color: theme.success,
-  ...typography.bodyMedium,
-  fontWeight: "700",
-},
+      marginTop: spacing.lg,
+      backgroundColor: theme.successBg,
+      borderRadius: radius.md,
+      paddingVertical: spacing.md,
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "row",
+      gap: 8,
+    },
+    reviewedText: {
+      color: theme.success,
+      ...typography.bodyMedium,
+      fontWeight: "700",
+    },
+    reviewDetailBox: {
+      borderRadius: radius.md,
+      backgroundColor: theme.surfaceElevated,
+      padding: spacing.md,
+      gap: 6,
+    },
+    reviewStarsRow: {
+      flexDirection: "row",
+      gap: 4,
+    },
+    reviewCommentText: {
+      ...typography.caption,
+      color: theme.textSecondary,
+      lineHeight: 18,
+    },
   });
 }

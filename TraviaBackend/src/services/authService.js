@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const prisma = require("../config/db");
 const { signToken } = require("../config/jwt");
+const { setCachedUserSnapshot } = require("../cache/userSnapshotCache");
 
 const register = async ({ name, email, password, role, gender }) => {
   const existing = await prisma.user.findUnique({ where: { email } });
@@ -14,16 +15,17 @@ const register = async ({ name, email, password, role, gender }) => {
   const passwordHash = await bcrypt.hash(password, 12);
 
   const user = await prisma.user.create({
-      data: {
-        name,
-        email,
-        passwordHash,
-        role: role || "passenger",
-        gender: gender || null,
-      },
-    });
+    data: {
+      name,
+      email,
+      passwordHash,
+      role: role || "passenger",
+      gender: gender || null,
+    },
+  });
 
   const token = signToken({ userId: user.id, role: user.role });
+  setCachedUserSnapshot(user);
 
   return {
     user: {
@@ -46,6 +48,15 @@ const login = async ({ email, password, role }) => {
     throw err;
   }
 
+  if (user.accountStatus === "suspended") {
+    const err = new Error(
+      user.accountSuspensionReason ||
+        "Your account has been suspended. Please contact support.",
+    );
+    err.statusCode = 403;
+    throw err;
+  }
+
   const isMatch = await bcrypt.compare(password, user.passwordHash);
   if (!isMatch) {
     const err = new Error("Invalid email or password");
@@ -53,14 +64,17 @@ const login = async ({ email, password, role }) => {
     throw err;
   }
 
-  // ✅ Role check (THIS is what you need)
+  // Role check (preserves your existing login flow)
   if (user.role !== role) {
-    const err = new Error(`You are not registered as a ${role}. Please switch role.`);
+    const err = new Error(
+      `You are not registered as a ${role}. Please switch role.`,
+    );
     err.statusCode = 403;
     throw err;
   }
 
   const token = signToken({ userId: user.id, role: user.role });
+  setCachedUserSnapshot(user);
 
   return {
     user: {
@@ -79,9 +93,20 @@ const syncUser = async ({ supabaseId, email, name, phone, role, gender }) => {
   let user = await prisma.user.findUnique({ where: { supabaseId } });
 
   if (user) {
+    if (user.accountStatus === "suspended") {
+      const err = new Error(
+        user.accountSuspensionReason ||
+          "Your account has been suspended. Please contact support.",
+      );
+      err.statusCode = 403;
+      throw err;
+    }
+
     // Check role mismatch
     if (role && user.role !== role) {
-      const err = new Error(`You are registered as a ${user.role}. Please log in as a ${user.role} instead.`);
+      const err = new Error(
+        `You are registered as a ${user.role}. Please log in as a ${user.role} instead.`,
+      );
       err.statusCode = 403;
       throw err;
     }
@@ -98,9 +123,20 @@ const syncUser = async ({ supabaseId, email, name, phone, role, gender }) => {
     });
 
     if (existing) {
+      if (existing.accountStatus === "suspended") {
+        const err = new Error(
+          existing.accountSuspensionReason ||
+            "Your account has been suspended. Please contact support.",
+        );
+        err.statusCode = 403;
+        throw err;
+      }
+
       // Check role mismatch on linking
       if (role && existing.role !== role) {
-        const err = new Error(`You are registered as a ${existing.role}. Please log in as a ${existing.role} instead.`);
+        const err = new Error(
+          `You are registered as a ${existing.role}. Please log in as a ${existing.role} instead.`,
+        );
         err.statusCode = 403;
         throw err;
       }
@@ -125,6 +161,7 @@ const syncUser = async ({ supabaseId, email, name, phone, role, gender }) => {
   }
 
   const token = signToken({ userId: user.id, role: user.role });
+  setCachedUserSnapshot(user);
 
   return {
     user: {
@@ -140,4 +177,39 @@ const syncUser = async ({ supabaseId, email, name, phone, role, gender }) => {
   };
 };
 
-module.exports = { register, login, syncUser };
+const getCurrentUser = async (userId) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      role: true,
+      gender: true,
+      accountStatus: true,
+      accountSuspensionReason: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!user) {
+    const err = new Error("User not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (user.accountStatus === "suspended") {
+    const err = new Error(
+      user.accountSuspensionReason ||
+        "Your account has been suspended. Please contact support.",
+    );
+    err.statusCode = 403;
+    throw err;
+  }
+
+  return { user };
+};
+
+module.exports = { register, login, syncUser, getCurrentUser };

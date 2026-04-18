@@ -1,9 +1,10 @@
-import React, { useState, useContext } from "react";
+import React, { useState, useContext, useMemo } from "react";
 import {
   View,
   Text,
   Pressable,
   StyleSheet,
+  TextInput,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -18,14 +19,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../../config/supabaseClient";
 import { useTheme } from "../../../app/providers/ThemeProvider";
 import { radius, spacing, typography } from "../../../config/theme";
-import { Input } from "../../../components/ui/Input";
 import { Button } from "../../../components/ui/Button";
 
 type LoginRouteProp = RouteProp<AuthStackParamList, "Login">;
 
 export function LoginScreen() {
   const { theme } = useTheme();
-  const { setToken } = useContext(AuthContext);
+  const { setToken, setSuspendedAccount } = useContext(AuthContext);
   const navigation = useNavigation<NativeStackNavigationProp<AuthStackParamList>>();
   const route = useRoute<LoginRouteProp>();
   const { role } = route.params;
@@ -61,28 +61,48 @@ export function LoginScreen() {
           await setToken(syncRes.token);
         } catch (syncError: any) {
           await supabase.auth.signOut();
+          const message = syncError?.message || "";
+          if (message.toLowerCase().includes("suspend")) {
+            setSuspendedAccount({
+              email: data.user.email ?? identifier,
+              role,
+              reason: message,
+            });
+          }
           throw syncError; 
         }
       }
     } catch (e: any) {
+      const message = e?.message || "Login failed";
+      if (message.toLowerCase().includes("suspend")) {
+        setSuspendedAccount({
+          email: identifier.includes("@") ? identifier : undefined,
+          role,
+          reason: message,
+        });
+      }
       setError(e.message || "Login failed");
     } finally {
       setLoading(false);
     }
   };
 
-  const s = makeStyles(theme);
+  const s = useMemo(() => makeStyles(theme), [theme]);
 
   return (
-    <SafeAreaView style={s.safeArea}>
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+    <SafeAreaView style={s.safeArea} edges={['top', 'left', 'right']}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={s.container}
+        enabled={Platform.OS === "ios"}
+        keyboardVerticalOffset={8}
       >
         <ScrollView 
           contentContainerStyle={s.scrollContent}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="none"
+          style={s.scrollView}
         >
           <View>
             <Pressable onPress={() => navigation.goBack()} style={s.backButton}>
@@ -95,24 +115,39 @@ export function LoginScreen() {
             </View>
 
             <View style={s.form}>
-              <Input
-                placeholder="Email or Phone Number"
-                value={identifier}
-                onChangeText={setIdentifier}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                leftIcon={<Ionicons name="person-outline" size={20} color={theme.textMuted} />}
-                containerStyle={{ marginBottom: 4 }}
-              />
+              <View style={s.inputContainer}>
+                <Ionicons name="person-outline" size={20} color={theme.textMuted} style={s.inputIcon} />
+                <TextInput
+                  placeholder="Email or Phone Number"
+                  value={identifier}
+                  onChangeText={setIdentifier}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  autoCorrect={false}
+                  autoComplete="email"
+                  textContentType="username"
+                  importantForAutofill="yes"
+                  style={s.input}
+                  placeholderTextColor={theme.textMuted}
+                />
+              </View>
 
-              <Input
-                placeholder="Password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                leftIcon={<Ionicons name="lock-closed-outline" size={20} color={theme.textMuted} />}
-                containerStyle={{ marginBottom: 4 }}
-              />
+              <View style={s.inputContainer}>
+                <Ionicons name="lock-closed-outline" size={20} color={theme.textMuted} style={s.inputIcon} />
+                <TextInput
+                  placeholder="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="password"
+                  textContentType="password"
+                  importantForAutofill="yes"
+                  style={s.input}
+                  placeholderTextColor={theme.textMuted}
+                />
+              </View>
 
               <Pressable 
                 onPress={() => navigation.navigate("ForgotPassword", { role })} 
@@ -158,13 +193,26 @@ function makeStyles(theme: any) {
   return StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: theme.background },
     container: { flex: 1 },
-    scrollContent: { flexGrow: 1, paddingHorizontal: spacing.xl, paddingBottom: 30, justifyContent: "space-between" },
+    scrollView: { flex: 1 },
+    scrollContent: { flexGrow: 1, paddingHorizontal: spacing.xl, paddingBottom: 30 },
     backButton: { width: 40, height: 40, justifyContent: "center", alignItems: "flex-start", marginTop: 10 },
     header: { marginTop: 20, marginBottom: spacing["3xl"] },
     title: { ...typography.hero, fontSize: 32, color: theme.textPrimary },
     subtitle: { ...typography.body, color: theme.textSecondary, marginTop: 8 },
     roleText: { color: theme.primary, fontWeight: "700", textTransform: "capitalize" },
     form: { gap: 12 },
+    inputContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: radius.lg,
+      paddingHorizontal: 16,
+      height: 56,
+    },
+    inputIcon: { marginRight: 12 },
+    input: { flex: 1, fontSize: 16, color: theme.textPrimary },
     forgotPasswordLink: { alignSelf: "flex-end", paddingVertical: 4, marginBottom: 8 },
     forgotPasswordText: { color: theme.primary, fontSize: 14, fontWeight: "600" },
     errorBox: { flexDirection: "row", alignItems: "center", backgroundColor: theme.dangerBg, padding: 12, borderRadius: 12, gap: 8, marginBottom: 12 },

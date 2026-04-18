@@ -1,10 +1,20 @@
 const prisma = require("../config/db");
 const supabaseAdmin = require("../config/supabaseAdmin");
+const { getIo } = require("../socket");
+const {
+  getAdminIncidents,
+  getIncidentCounts,
+  updateAdminIncident,
+} = require("./incidentService");
 const {
   getDriverVerificationDetail,
   reviewDriverVerification,
   formatVerification,
 } = require("./driverVerificationService");
+const {
+  getAccountAppeals,
+  resolveAccountAppeal,
+} = require("./supportService");
 
 const getCurrentAdmin = async (adminId) => {
   const user = await prisma.user.findUnique({
@@ -34,12 +44,18 @@ const getStats = async () => {
     totalRides,
     pendingVerifications,
     totalBookings,
+    suspendedUsers,
+    pendingAppeals,
+    incidentCounts,
   ] = await Promise.all([
     prisma.user.count(),
     prisma.user.count({ where: { role: "driver" } }),
     prisma.ride.count(),
     prisma.driverVerification.count({ where: { adminDecision: "pending" } }),
     prisma.booking.count(),
+    prisma.user.count({ where: { accountStatus: "suspended" } }),
+    prisma.accountAppeal.count({ where: { status: "pending" } }),
+    getIncidentCounts(),
   ]);
 
   return {
@@ -48,6 +64,9 @@ const getStats = async () => {
     totalRides,
     pendingVerifications,
     totalBookings,
+    suspendedUsers,
+    pendingAppeals,
+    ...incidentCounts,
   };
 };
 
@@ -273,11 +292,113 @@ const getAllUsers = async () => {
       phone: true,
       role: true,
       driverStatus: true,
+      accountStatus: true,
+      accountSuspensionReason: true,
+      accountSuspendedAt: true,
       createdAt: true,
     },
     orderBy: { createdAt: "desc" },
   });
   return { users };
+};
+
+const suspendUser = async (adminId, userId, reason) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      accountStatus: true,
+    },
+  });
+
+  if (!user) {
+    const err = new Error("User not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      accountStatus: "suspended",
+      accountSuspensionReason:
+        reason || "Your account has been suspended by an admin.",
+      accountSuspendedAt: new Date(),
+      accountSuspendedByAdminId: adminId,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      accountStatus: true,
+      accountSuspensionReason: true,
+      accountSuspendedAt: true,
+    },
+  });
+
+  try {
+    getIo().in(`user_${userId}`).disconnectSockets();
+  } catch {
+    // Socket server may not be available in some tests.
+  }
+
+  return {
+    message: `User ${user.name || user.email} suspended successfully`,
+    user: updated,
+  };
+};
+
+const restoreUser = async (adminId, userId) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      accountStatus: true,
+    },
+  });
+
+  if (!user) {
+    const err = new Error("User not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      accountStatus: "active",
+      accountSuspensionReason: null,
+      accountSuspendedAt: null,
+      accountSuspendedByAdminId: adminId,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      accountStatus: true,
+      accountSuspensionReason: true,
+      accountSuspendedAt: true,
+    },
+  });
+
+  try {
+    getIo().in(`user_${userId}`).disconnectSockets();
+  } catch {
+    // Socket server may not be available in some tests.
+  }
+
+  return {
+    message: `User ${user.name || user.email} restored successfully`,
+    user: updated,
+  };
 };
 
 const getRideDetail = async (rideId) => {
@@ -360,6 +481,22 @@ const getRideDetail = async (rideId) => {
   return { ride };
 };
 
+const getIncidents = async ({ kind, status }) => {
+  return getAdminIncidents({ kind, status });
+};
+
+const updateIncident = async (adminId, incidentId, payload) => {
+  return updateAdminIncident(adminId, incidentId, payload);
+};
+
+const getAppeals = async ({ status }) => {
+  return getAccountAppeals({ status });
+};
+
+const updateAppeal = async (adminId, appealId, payload) => {
+  return resolveAccountAppeal(adminId, appealId, payload);
+};
+
 module.exports = {
   getCurrentAdmin,
   getStats,
@@ -371,5 +508,11 @@ module.exports = {
   rejectDriver,
   getAllRides,
   getAllUsers,
+  suspendUser,
+  restoreUser,
   getRideDetail,
+  getIncidents,
+  updateIncident,
+  getAppeals,
+  updateAppeal,
 };
